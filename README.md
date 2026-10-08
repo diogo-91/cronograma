@@ -31,6 +31,7 @@ js/cronograma.js   lógica pura (datas, status, validação, filtros, resumo, es
 js/app.js          interface (renderização, diálogo, armazenamento, importar/exportar)
 css/styles.css     layout responsivo, tema e impressão
 img/               logo GoldSystem (topo e favicon)
+fonts/             fonte Inter embutida (licença OFL em fonts/OFL-Inter.txt), funciona sem internet
 tests/             testes unitários da lógica (node:test)
 e2e/               teste ponta a ponta no navegador (Playwright)
 ```

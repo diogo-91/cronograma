@@ -46,6 +46,8 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.equal(await page.getAttribute('#f-nome', 'aria-invalid'), 'true');
   // término antes do início
   await page.fill('#f-nome', 'Reunião de kickoff');
+  assert.equal(await page.textContent('#e-nome'), '', 'erro do nome some ao corrigir');
+  assert.equal(await page.getAttribute('#f-nome', 'aria-invalid'), 'false');
   await page.fill('#f-fase', 'Planejamento');
   await page.fill('#f-inicio', '2026-10-20');
   // aoMudarInicio deve ter empurrado o fim para depois do início se necessário
@@ -61,6 +63,7 @@ fs.mkdirSync(OUT, { recursive: true });
   await page.fill('#f-progresso', '40');
   await page.dispatchEvent('#f-progresso', 'input');
   assert.equal(await page.inputValue('#f-progresso-faixa'), '40');
+  assert.equal(await page.evaluate(() => document.querySelector('#f-progresso-faixa').style.getPropertyValue('--v')), '40%');
   await page.screenshot({ path: path.join(OUT, '03-dialogo-desktop.png') });
   await page.click('#form-tarefa button[type=submit]');
   assert.equal(await page.isVisible('#dialogo'), false, 'diálogo fechou');
@@ -158,8 +161,8 @@ fs.mkdirSync(OUT, { recursive: true });
   const escuro = await nova({ viewport: { width: 1366, height: 860 }, colorScheme: 'dark' });
   await escuro.page.goto(URL_APP);
   await escuro.page.click('text=Ver um exemplo');
-  assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(246, 247, 251)');
-  assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.querySelector('.topo')).backgroundColor), 'rgb(255, 255, 255)');
+  assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(245, 245, 243)');
+  assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.querySelector('.topo')).backgroundColor), 'rgba(255, 255, 255, 0.82)');
   await escuro.page.screenshot({ path: path.join(OUT, '07-tema-claro-com-sistema-escuro.png') });
 
   // ---------- Mobile ----------

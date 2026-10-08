@@ -215,3 +215,11 @@ test('escalaGantt troca para escala mais grossa quando o período é longo demai
   assert.equal(C.zoomEfetivo(anos, 'semana'), 'semana');
   assert.equal(C.zoomEfetivo([], 'dia'), 'dia');
 });
+
+test('iniciais usa a primeira letra do primeiro e do último nome', () => {
+  assert.equal(C.iniciais('Ana Souza'), 'AS');
+  assert.equal(C.iniciais('  joão da silva  '), 'JS');
+  assert.equal(C.iniciais('Bruno'), 'B');
+  assert.equal(C.iniciais('élida'), 'É');
+  assert.equal(C.iniciais(''), '');
+});

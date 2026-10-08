@@ -247,6 +247,13 @@ const Cronograma = (() => {
     return { ok: true, dados: { titulo: texto(bruto.titulo) || 'Meu cronograma', tarefas } };
   }
 
+  function iniciais(nome) {
+    const partes = nome.trim().split(/\s+/).filter(Boolean);
+    if (!partes.length) return '';
+    const letras = partes.length > 1 ? [partes[0], partes[partes.length - 1]] : [partes[0]];
+    return letras.map((p) => p[0].toLocaleUpperCase('pt-BR')).join('');
+  }
+
   function indicesDeCor(tarefas) {
     const fases = [...new Set(tarefas.map((t) => t.fase).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
     return new Map(fases.map((fase, i) => [fase, i]));
@@ -270,6 +277,7 @@ const Cronograma = (() => {
     novoId,
     importarDados,
     indicesDeCor,
+    iniciais,
   };
 })();
 

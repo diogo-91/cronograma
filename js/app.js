@@ -15,6 +15,21 @@
   const ICONES = {
     duplicar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
     excluir: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>',
+    atividades: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>',
+    concluidas: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>',
+    andamento: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    atrasadas: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>',
+    pendentes: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="3.5 3"/></svg>',
+    ilustracao: `<svg class="ilustracao" viewBox="0 0 240 150" aria-hidden="true">
+      <rect x="12" y="10" width="216" height="128" rx="16" fill="#ffffff" stroke="#e6e4de"/>
+      <path d="M12 40h216" stroke="#e6e4de"/>
+      <circle cx="30" cy="25" r="4" fill="#f2d27a"/><circle cx="44" cy="25" r="4" fill="#e6e4de"/><circle cx="58" cy="25" r="4" fill="#e6e4de"/>
+      <rect x="30" y="54" width="78" height="14" rx="7" fill="#d4a12a"/>
+      <rect x="64" y="78" width="104" height="14" rx="7" fill="#6366f1" opacity="0.85"/>
+      <rect x="112" y="102" width="88" height="14" rx="7" fill="#14b8a6" opacity="0.85"/>
+      <path d="M140 46v84" stroke="#e5484d" stroke-width="2" stroke-dasharray="4 4"/>
+      <circle cx="140" cy="46" r="4" fill="#e5484d"/>
+    </svg>`,
   };
 
   const $ = (seletor) => document.querySelector(seletor);
@@ -166,20 +181,27 @@
   }
 
   function renderResumo(r, filtrando) {
-    const cartao = (rotulo, valor, classe, ...extras) =>
-      el('div', { class: 'cartao' }, el('div', { class: 'cartao-rotulo' }, rotulo), el('div', { class: `cartao-valor ${classe || ''}` }, valor), ...extras);
+    const indicador = (rotulo, valor, tipo) =>
+      el('div', { class: `cartao kpi kpi-${tipo}` },
+        el('span', { class: 'kpi-icone' }, icone(tipo)),
+        el('div', { class: 'cartao-rotulo' }, rotulo),
+        el('div', { class: 'cartao-valor' }, String(valor)));
     const periodo = r.inicio
-      ? `${C.formatarData(r.inicio)} a ${C.formatarData(r.fim)} · ${r.dias} ${r.dias === 1 ? 'dia' : 'dias'} corridos`
-      : 'Sem atividades';
+      ? [el('span', {}, `${C.formatarData(r.inicio)} a ${C.formatarData(r.fim)}`), ' · ', el('span', {}, `${r.dias} ${r.dias === 1 ? 'dia' : 'dias'} corridos`)]
+      : ['Sem atividades'];
     $('#resumo').replaceChildren(
-      cartao(filtrando ? 'Progresso (filtrado)' : 'Progresso geral', `${r.progressoGeral}%`, '',
-        el('div', { class: 'medidor' }, el('span', { style: { width: `${r.progressoGeral}%` } })),
-        el('div', { class: 'periodo' }, periodo)),
-      cartao('Atividades', String(r.total)),
-      cartao('Concluídas', String(r.concluidas), 'concluida'),
-      cartao('Em andamento', String(r.andamento), 'andamento'),
-      cartao('Atrasadas', String(r.atrasadas), 'atrasada'),
-      cartao('Não iniciadas', String(r.pendentes)),
+      el('div', { class: 'cartao cartao-progresso' },
+        el('div', { class: 'anel', style: { '--p': r.progressoGeral }, role: 'img', 'aria-label': `${r.progressoGeral}% concluído` },
+          el('span', { class: 'anel-valor' }, `${r.progressoGeral}%`)),
+        el('div', { class: 'progresso-texto' },
+          el('div', { class: 'cartao-rotulo' }, filtrando ? 'Progresso (filtrado)' : 'Progresso geral'),
+          el('div', { class: 'progresso-frase' }, `${r.concluidas} de ${r.total} ${r.total === 1 ? 'atividade concluída' : 'atividades concluídas'}`),
+          el('div', { class: 'periodo' }, ...periodo))),
+      indicador('Atividades', r.total, 'atividades'),
+      indicador('Concluídas', r.concluidas, 'concluidas'),
+      indicador('Em andamento', r.andamento, 'andamento'),
+      indicador('Atrasadas', r.atrasadas, 'atrasadas'),
+      indicador('Não iniciadas', r.pendentes, 'pendentes'),
     );
   }
 
@@ -196,6 +218,7 @@
   function renderVazio(semTarefas) {
     const conteudo = semTarefas
       ? [
+          icone('ilustracao'),
           el('h2', {}, 'Seu cronograma está vazio'),
           el('p', {}, 'Cadastre as atividades com datas de início e término e acompanhe tudo no gráfico de Gantt ou em lista. Os dados ficam salvos neste navegador.'),
           el('div', { class: 'botoes' },
@@ -294,7 +317,10 @@
           el('button', { type: 'button', class: 'nome-link', 'data-id': t.id, onclick: () => abrirEditor(t.id) }, el('span', { class: 'ponto' }), el('span', {}, t.nome)),
           t.notas && el('div', { class: 'notas' }, t.notas)),
         celula('Fase', t.fase, 'c-fase'),
-        celula('Responsável', t.responsavel, 'c-resp'),
+        el('td', { 'data-rotulo': 'Responsável', class: t.responsavel ? 'c-resp' : 'c-resp vazio-celula' },
+          t.responsavel
+            ? el('span', { class: 'pessoa' }, el('span', { class: 'avatar', 'aria-hidden': 'true' }, C.iniciais(t.responsavel)), el('span', {}, t.responsavel))
+            : '—'),
         celula('Início', C.formatarData(t.inicio), 'data c-inicio'),
         celula('Término', C.formatarData(t.fim), 'data c-fim'),
         celula('Duração', `${dias} ${dias === 1 ? 'dia' : 'dias'}`, 'num c-dur'),
@@ -328,7 +354,7 @@
     };
     estado.editando = tarefa ? tarefa.id : null;
     for (const campo of CAMPOS) form.elements[campo].value = valores[campo];
-    $('#f-progresso-faixa').value = valores.progresso;
+    atualizarFaixa(valores.progresso);
     $('#dialogo-titulo').textContent = tarefa ? 'Editar atividade' : 'Nova atividade';
     $('#btn-excluir').hidden = !tarefa;
     duracaoEditada = C.duracaoDias(valores);
@@ -336,6 +362,19 @@
     atualizarDuracao();
     dialogo.showModal();
     if (!tarefa) form.elements.nome.focus();
+  }
+
+  function atualizarFaixa(valor) {
+    const faixa = $('#f-progresso-faixa');
+    faixa.value = valor;
+    faixa.style.setProperty('--v', `${faixa.value}%`);
+  }
+
+  function limparErro(campo) {
+    const p = form.querySelector(`[data-erro="${campo}"]`);
+    if (!p) return;
+    p.textContent = '';
+    form.elements[campo].setAttribute('aria-invalid', 'false');
   }
 
   function mostrarErros(erros) {
@@ -576,8 +615,16 @@
   form.addEventListener('submit', salvarEditor);
   form.elements.inicio.addEventListener('change', aoMudarInicio);
   form.elements.fim.addEventListener('change', atualizarDuracao);
-  $('#f-progresso-faixa').addEventListener('input', (ev) => { form.elements.progresso.value = ev.target.value; });
-  form.elements.progresso.addEventListener('input', (ev) => { $('#f-progresso-faixa').value = ev.target.value; });
+  $('#f-progresso-faixa').addEventListener('input', (ev) => {
+    form.elements.progresso.value = ev.target.value;
+    atualizarFaixa(ev.target.value);
+    limparErro('progresso');
+  });
+  form.elements.progresso.addEventListener('input', (ev) => atualizarFaixa(ev.target.value));
+  form.addEventListener('input', (ev) => {
+    const campos = ev.target.name === 'inicio' || ev.target.name === 'fim' ? ['inicio', 'fim'] : [ev.target.name];
+    for (const campo of campos) limparErro(campo);
+  });
   $('#btn-excluir').addEventListener('click', () => {
     const id = estado.editando;
     dialogo.close();
