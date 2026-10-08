@@ -11,12 +11,13 @@
     salvo: 'Salvo no servidor',
     salvando: 'Salvando…',
     pendente: 'Sem conexão: alterações pendentes',
+    recusado: 'Não salvo: o servidor recusou os dados',
   };
   const TITULO_PADRAO = 'Meu cronograma';
   const VISOES = ['gantt', 'tabela'];
   const ZOOMS = ['dia', 'semana', 'mes'];
   const NUM_CORES = 8;
-  const TAMANHO_MAXIMO_IMPORTACAO = 5 * 1024 * 1024;
+  const TAMANHO_MAXIMO_IMPORTACAO = 1.5 * 1024 * 1024;
   const LARGURA_IMPRESSAO = 960;
   const CAMPOS = ['nome', 'fase', 'responsavel', 'inicio', 'fim', 'progresso', 'notas'];
   const ICONES = {
@@ -61,6 +62,8 @@
   let envioEmCurso = false;
   let aguardandoEnvio = [];
   let temporizadorGravar = null;
+  let geracaoSessao = 0;
+  const gravacoesSemResposta = new Set();
 
   function el(tag, props = {}, ...filhos) {
     const e = document.createElement(tag);
@@ -113,7 +116,7 @@
       const resposta = await fetch(url, {
         method: metodo,
         headers: corpo === undefined ? {} : { 'Content-Type': 'application/json' },
-        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+        body: corpo === undefined || typeof corpo === 'string' ? corpo : JSON.stringify(corpo),
         ...extras,
       });
       const dados = await resposta.json().catch(() => null);
@@ -146,7 +149,7 @@
 
   function entrarNoApp() {
     mostrarTela('app');
-    indicar(alteracoesPendentes ? 'salvando' : 'salvo');
+    indicar(alteracoesPendentes || envioEmCurso ? 'salvando' : 'salvo');
     rolarParaHoje = true;
     render();
     oferecerDadosDoNavegador();
@@ -201,7 +204,7 @@
   function indicar(situacao) {
     const indicador = $('#salvo');
     indicador.textContent = TEXTO_INDICADOR[situacao];
-    indicador.classList.toggle('falhou', situacao === 'pendente');
+    indicador.classList.toggle('falhou', situacao === 'pendente' || situacao === 'recusado');
     indicador.classList.toggle('salvando', situacao === 'salvando');
   }
 
@@ -220,33 +223,70 @@
     alteracoesPendentes = false;
     const avisados = aguardandoEnvio;
     aguardandoEnvio = [];
-    const corpo = { revisaoBase: revisao, titulo: estado.titulo, tarefas: estado.tarefas };
-    const manterViva = aoSair && JSON.stringify(corpo).length < LIMITE_ENVIO_AO_SAIR;
+    const idGravacao = C.novoId();
+    const geracao = geracaoSessao;
+    const corpo = JSON.stringify({ revisaoBase: revisao, idGravacao, titulo: estado.titulo, tarefas: estado.tarefas });
+    const manterViva = aoSair && new TextEncoder().encode(corpo).length < LIMITE_ENVIO_AO_SAIR;
+    gravacoesSemResposta.add(idGravacao);
     const r = await chamarApi('PUT', 'api/cronograma', corpo, { keepalive: manterViva });
     envioEmCurso = false;
-    const ok = r.status === 200;
-    if (ok) {
+    if (r.status !== 0) gravacoesSemResposta.delete(idGravacao);
+    const atual = r.status === 409 ? r.dados.atual : null;
+
+    if (r.status === 200) {
       revisao = r.dados.revisao;
-    } else if (r.status === 409) {
-      receberConflito(r.dados.atual);
-    } else if (r.status === 401) {
-      alteracoesPendentes = true;
-      mostrarLogin();
-    } else if (r.status === 400 || r.status === 413) {
-      avisar(`O servidor recusou a gravação. ${r.dados?.erro || ''}`);
-    } else {
-      alteracoesPendentes = true;
-      temporizadorGravar = setTimeout(enviar, ESPERA_NOVA_TENTATIVA_MS);
-      avisar('Sem conexão com o servidor. As alterações serão enviadas assim que a conexão voltar.');
+      gravacoesSemResposta.clear();
+      for (const resolver of avisados) resolver(true);
+      if (alteracoesPendentes) enviar();
+      else indicar('salvo');
+      return;
     }
-    for (const resolver of avisados) resolver(ok);
-    if (ok && alteracoesPendentes) enviar();
-    indicar(!alteracoesPendentes ? 'salvo' : ok ? 'salvando' : 'pendente');
+    if (atual && atual.revisao < revisao) {
+      avisar('O servidor estava com uma versão mais antiga do cronograma. Enviando a versão deste aparelho.');
+    }
+    if (atual && (gravacoesSemResposta.has(atual.idGravacao) || atual.revisao < revisao)) {
+      revisao = atual.revisao;
+      gravacoesSemResposta.clear();
+      tentarDeNovo(avisados);
+      enviar();
+      return;
+    }
+    if (atual) {
+      for (const resolver of avisados) resolver(false);
+      receberConflito(atual);
+      return;
+    }
+    if (r.status === 401) {
+      tentarDeNovo(avisados);
+      if (geracao !== geracaoSessao) enviar();
+      else mostrarLogin();
+      indicar('pendente');
+      return;
+    }
+    if (r.status === 400 || r.status === 413) {
+      alteracoesPendentes = true;
+      for (const resolver of avisados) resolver(false);
+      indicar('recusado');
+      avisar(`O servidor recusou a gravação. ${r.dados?.erro || ''}`);
+      return;
+    }
+    tentarDeNovo(avisados);
+    temporizadorGravar = setTimeout(enviar, ESPERA_NOVA_TENTATIVA_MS);
+    indicar('pendente');
+    avisar('Sem conexão com o servidor. As alterações serão enviadas assim que a conexão voltar.');
+  }
+
+  function tentarDeNovo(avisados) {
+    alteracoesPendentes = true;
+    aguardandoEnvio = [...avisados, ...aguardandoEnvio];
   }
 
   function receberConflito(atual) {
     clearTimeout(temporizadorGravar);
     alteracoesPendentes = false;
+    for (const resolver of aguardandoEnvio) resolver(false);
+    aguardandoEnvio = [];
+    gravacoesSemResposta.clear();
     aplicarDocumento(atual);
     render();
     avisar('Este cronograma foi alterado em outro aparelho. Carreguei a versão mais recente: confira e refaça sua última alteração.');
@@ -255,9 +295,10 @@
   async function sincronizar() {
     const ocupado = () => document.body.dataset.tela !== 'app' || alteracoesPendentes || envioEmCurso || dialogo.open;
     if (ocupado()) return;
+    const revisaoAntes = revisao;
     const r = await chamarApi('GET', 'api/cronograma');
     if (r.status === 401) return mostrarLogin();
-    if (r.status === 200 && r.dados.revisao !== revisao && !ocupado()) aplicarDocumento(r.dados);
+    if (r.status === 200 && r.dados.revisao > revisao && revisao === revisaoAntes && !ocupado()) aplicarDocumento(r.dados);
     render();
   }
 
@@ -782,7 +823,8 @@
       $('#senha').select();
       return;
     }
-    if (alteracoesPendentes) {
+    geracaoSessao += 1;
+    if (alteracoesPendentes || envioEmCurso) {
       entrarNoApp();
       enviar();
     } else if (await carregarDoServidor()) {

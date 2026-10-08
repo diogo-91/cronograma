@@ -190,11 +190,12 @@ fs.mkdirSync(OUT, { recursive: true });
   await page.waitForSelector('.tabela tbody tr');
   assert.equal(await page.locator('.tabela tbody tr').count(), 12, 'reimportou');
   assert.equal(await page.inputValue('#titulo'), 'Obra da casa');
+  await aguardarAnuncio(page, '12 atividades importadas.');
   // importar inválido
   const ruim = path.join(OUT, 'ruim.json');
   fs.writeFileSync(ruim, JSON.stringify({ tarefas: [{ nome: '', inicio: 'x', fim: 'y' }] }));
   await page.setInputFiles('#arquivo', ruim);
-  assert.match(await page.textContent('#toast'), /Importação cancelada\. Tarefa 1/);
+  await aguardarAnuncio(page, 'Importação cancelada. Tarefa 1');
   assert.equal(await page.locator('.tabela tbody tr').count(), 12, 'importação inválida não apagou nada');
 
   // XSS: nome com HTML não vira markup
@@ -375,6 +376,115 @@ fs.mkdirSync(OUT, { recursive: true });
   await semApi.page.goto(URL_A);
   await semApi.page.waitForSelector('text=Servidor do cronograma não encontrado');
   assert.equal(await semApi.page.isVisible('#btn-nova'), false);
+
+  // resposta perdida: a gravação chegou ao servidor, mas o aparelho não soube; não vira conflito falso
+  const perda = await nova({ viewport: { width: 1366, height: 860 } });
+  await entrar(perda.page, await novoServidor());
+  let perderResposta = true;
+  await perda.page.route('**/api/cronograma', async (r) => {
+    if (r.request().method() !== 'PUT' || !perderResposta) return r.continue();
+    perderResposta = false;
+    await r.fetch();
+    return r.abort();
+  });
+  await salvarTarefa(perda.page, 'B gravada sem resposta');
+  await perda.page.waitForFunction(() => document.querySelector('#salvo').textContent.startsWith('Sem conexão'));
+  await salvarTarefa(perda.page, 'C depois da falha');
+  await aguardarSalvo(perda.page);
+  assert.doesNotMatch(await perda.page.textContent('#anuncio'), /outro aparelho/);
+  await perda.page.unroute('**/api/cronograma');
+  await perda.page.reload();
+  await perda.page.waitForSelector('body[data-tela="app"]');
+  assert.deepEqual((await perda.page.locator('.g-nome-texto').allTextContents()).sort(), ['B gravada sem resposta', 'C depois da falha']);
+
+  // servidor recusou os dados: o indicador não diz "Salvo no servidor"; importação grande é barrada antes
+  await perda.page.route('**/api/cronograma', (r) => (r.request().method() === 'PUT'
+    ? r.fulfill({ status: 413, contentType: 'application/json', body: JSON.stringify({ erro: 'Dados grandes demais.' }) })
+    : r.continue()));
+  await salvarTarefa(perda.page, 'Recusada');
+  await perda.page.waitForFunction(() => document.querySelector('#salvo').textContent.startsWith('Não salvo'));
+  assert.match(await perda.page.textContent('#anuncio'), /recusou/);
+  await perda.page.unroute('**/api/cronograma');
+  const grande = path.join(OUT, 'grande.json');
+  fs.writeFileSync(grande, JSON.stringify({
+    titulo: 'Grande',
+    tarefas: Array.from({ length: 9000 }, (_, i) => ({ nome: `Atividade número ${i}`, inicio: '2026-10-01', fim: '2026-10-02', notas: 'x'.repeat(150) })),
+  }));
+  await perda.page.setInputFiles('#arquivo', grande);
+  await aguardarAnuncio(perda.page, 'grande demais');
+
+  // sincronização lenta não desfaz o que foi gravado enquanto ela estava a caminho
+  const URL_LENTO = await novoServidor();
+  const lento = await nova({ viewport: { width: 1366, height: 860 } });
+  await entrar(lento.page, URL_LENTO);
+  let atrasarGet = true;
+  await lento.page.route('**/api/cronograma', async (r) => {
+    if (r.request().method() !== 'GET' || !atrasarGet) return r.continue();
+    atrasarGet = false;
+    const antiga = await r.fetch();
+    await new Promise((ok) => setTimeout(ok, 2000));
+    return r.fulfill({ response: antiga });
+  });
+  await lento.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await salvarTarefa(lento.page, 'D durante a sincronização');
+  await aguardarSalvo(lento.page);
+  await lento.page.waitForTimeout(2500);
+  assert.equal(await lento.page.locator('.g-nome-texto:has-text("D durante a sincronização")').count(), 1, 'GET antigo não apagou D');
+  await salvarTarefa(lento.page, 'E depois');
+  await aguardarSalvo(lento.page);
+  assert.doesNotMatch(await lento.page.textContent('#anuncio'), /outro aparelho/);
+  await lento.page.unroute('**/api/cronograma');
+
+  // edição feita durante um envio que termina em conflito não ganha aviso falso de sucesso depois
+  const outroLento = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await entrar(outroLento.page, URL_LENTO);
+  await salvarTarefa(outroLento.page, 'Do outro aparelho');
+  await aguardarSalvo(outroLento.page);
+  await lento.page.click('[data-visao=tabela]');
+  await lento.page.evaluate(() => {
+    window.__anuncios = [];
+    new MutationObserver((registros) => {
+      for (const r of registros) for (const no of r.addedNodes) window.__anuncios.push(no.textContent);
+    })
+      .observe(document.querySelector('#anuncio'), { childList: true, characterData: true, subtree: true });
+  });
+  await lento.page.route('**/api/cronograma', async (r) => {
+    if (r.request().method() === 'PUT') await new Promise((ok) => setTimeout(ok, 1500));
+    return r.continue();
+  });
+  await salvarTarefa(lento.page, 'X vai conflitar');
+  await lento.page.waitForTimeout(700);
+  await lento.page.click('[aria-label="Duplicar E depois"]');
+  await aguardarAnuncio(lento.page, 'outro aparelho');
+  await lento.page.unroute('**/api/cronograma');
+  await salvarTarefa(lento.page, 'Z depois do conflito');
+  await aguardarSalvo(lento.page);
+  await lento.page.waitForTimeout(300);
+  const anuncios = await lento.page.evaluate(() => window.__anuncios);
+  assert.ok(!anuncios.includes('Atividade duplicada.'), `aviso falso: ${anuncios.join(' | ')}`);
+
+  // entrar enquanto um envio sem sessão está a caminho não perde a alteração pendente
+  const sessao = await nova({ viewport: { width: 1366, height: 860 } });
+  await entrar(sessao.page, await novoServidor());
+  await sessao.ctx.clearCookies();
+  await salvarTarefa(sessao.page, 'Pendente B');
+  await sessao.page.waitForSelector('body[data-tela="login"]');
+  await sessao.page.route('**/api/cronograma', async (r) => {
+    if (r.request().method() !== 'PUT') return r.continue();
+    const resposta = await r.fetch();
+    await new Promise((ok) => setTimeout(ok, 1500));
+    return r.fulfill({ response: resposta });
+  });
+  await sessao.page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await sessao.page.fill('#senha', SENHA);
+  await sessao.page.click('#form-login button[type=submit]');
+  await sessao.page.waitForSelector('body[data-tela="app"]');
+  await sessao.page.waitForTimeout(2000);
+  await aguardarSalvo(sessao.page);
+  assert.equal(await sessao.page.evaluate(() => document.body.dataset.tela), 'app', 'não pediu a senha de novo');
+  await sessao.page.reload();
+  await sessao.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await sessao.page.locator('.g-nome-texto:has-text("Pendente B")').count(), 1, 'pendente chegou ao servidor');
 
   // sair volta para a tela de senha
   await page.click('#menu summary');

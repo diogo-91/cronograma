@@ -8,7 +8,8 @@ Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com 
 2. Em **Ports Exposes**, use `3000`.
 3. Em **Environment Variables**, crie `SENHA` com a senha de acesso (mínimo de 8 caracteres). Marque como segredo, se a opção existir.
 4. Em **Persistent Storage**, adicione um **Volume Mount** com destino (`Destination Path`) `/data`. É ali que fica o arquivo `cronograma.json`; sem o volume, os dados somem a cada novo deploy.
-5. Faça o **Deploy** e abra o endereço da aplicação. Prefira um domínio com `https://`, porque a senha trafega no login.
+5. Faça o **Deploy** e abra o endereço da aplicação. Use um domínio com `https://`: em `http://` a senha e o cookie de sessão trafegam sem criptografia.
+6. Não publique a porta `3000` diretamente (*Ports Mappings* vazio): o limite de tentativas de senha confia no endereço informado pelo proxy do Coolify.
 
 Se o log mostrar `Sem permissão de escrita em /data`, o volume foi criado como pasta do servidor (bind mount) em vez de volume do Docker. Use **Volume Mount**.
 
@@ -30,7 +31,8 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 No servidor, no arquivo `cronograma.json` dentro do volume `/data`. Cada alteração é enviada logo depois de feita; o indicador abaixo do título mostra *Salvando…*, *Salvo no servidor* ou *Sem conexão: alterações pendentes* (nesse caso o app tenta de novo sozinho e reenvia quando a conexão volta).
 
 - **Vários aparelhos:** ao voltar para a aba, o app busca a versão mais recente. Se dois aparelhos editarem ao mesmo tempo sem atualizar, o segundo a gravar recebe a versão do primeiro e um aviso para refazer a última alteração, em vez de apagar o que o outro fez.
-- **Senha:** uma só, definida em `SENHA`. Quem tem a senha vê e edita o mesmo cronograma. A sessão dura 30 dias; trocar a senha encerra todas as sessões. Após 5 senhas erradas, o endereço que errou espera 15 minutos.
+- **Senha:** uma só, definida em `SENHA`. Quem tem a senha vê e edita o mesmo cronograma. Após 5 tentativas erradas, o endereço que errou espera 15 minutos.
+- **Sessão:** dura 30 dias e é assinada com um segredo aleatório guardado em `/data/segredo-sessao` (o cookie não serve para descobrir a senha). *Sair* encerra a sessão só naquele aparelho; para encerrar em todos, troque a `SENHA` ou apague `/data/segredo-sessao` e reinicie.
 - **Dados antigos do navegador:** se você usava a versão anterior (que salvava só no navegador), no primeiro acesso o app oferece enviar essas atividades para o servidor.
 - **Backup:** faça *Arquivo → Exportar backup (JSON)* de vez em quando, ou copie o volume `/data` pelo Coolify.
 

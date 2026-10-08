@@ -6,7 +6,10 @@ const Cronograma = require('./js/cronograma.js');
 
 const RAIZ = __dirname;
 const NOME_ARQUIVO_DADOS = 'cronograma.json';
+const NOME_ARQUIVO_SEGREDO = 'segredo-sessao';
 const LIMITE_CORPO = 2 * 1024 * 1024;
+const LIMITE_CORPO_LOGIN = 1024;
+const ID_GRAVACAO = /^[\w-]{1,64}$/;
 const DURACAO_SESSAO_S = 30 * 24 * 60 * 60;
 const MAX_FALHAS_LOGIN = 5;
 const JANELA_FALHAS_MS = 15 * 60 * 1000;
@@ -33,36 +36,79 @@ class ErroHttp extends Error {
   }
 }
 
+function idGravacaoValido(valor) {
+  return typeof valor === 'string' && ID_GRAVACAO.test(valor) ? valor : null;
+}
+
 function lerDocumento(texto) {
   const r = Cronograma.importarDados(texto);
   if (!r.ok) return null;
-  const { revisao } = JSON.parse(texto);
-  return Number.isInteger(revisao) && revisao >= 0 ? { revisao, ...r.dados } : null;
+  const { revisao, idGravacao } = JSON.parse(texto);
+  return Number.isInteger(revisao) && revisao >= 0 ? { revisao, idGravacao: idGravacaoValido(idGravacao), ...r.dados } : null;
 }
 
-function criarArmazenamento(pasta) {
-  const arquivo = path.join(pasta, NOME_ARQUIVO_DADOS);
+function verificarEscrita(pasta) {
   fs.mkdirSync(pasta, { recursive: true });
   try {
     fs.accessSync(pasta, fs.constants.W_OK);
   } catch {
     throw new Error(`Sem permissão de escrita em ${pasta}. Confira o volume persistente (PASTA_DADOS).`);
   }
-  let doc = { revisao: 0, titulo: 'Meu cronograma', tarefas: [] };
-  if (fs.existsSync(arquivo)) {
+}
+
+function lerOuCriarSegredo(pasta) {
+  const arquivo = path.join(pasta, NOME_ARQUIVO_SEGREDO);
+  try {
+    const segredo = fs.readFileSync(arquivo);
+    if (segredo.length >= 32) return segredo;
+  } catch (erro) {
+    if (erro.code !== 'ENOENT') throw erro;
+  }
+  const segredo = crypto.randomBytes(32);
+  try {
+    fs.writeFileSync(arquivo, segredo, { mode: 0o600, flag: 'wx' });
+    return segredo;
+  } catch (erro) {
+    if (erro.code === 'EEXIST') return fs.readFileSync(arquivo);
+    throw erro;
+  }
+}
+
+function criarArmazenamento(pasta) {
+  const arquivo = path.join(pasta, NOME_ARQUIVO_DADOS);
+  let doc = { revisao: 0, idGravacao: null, titulo: 'Meu cronograma', tarefas: [] };
+  let versaoNoDisco = null;
+
+  function lerDoDisco() {
+    let estado;
+    try {
+      estado = fs.statSync(arquivo);
+    } catch (erro) {
+      if (erro.code === 'ENOENT') return;
+      throw erro;
+    }
+    if (estado.mtimeMs === versaoNoDisco) return;
     const lido = lerDocumento(fs.readFileSync(arquivo, 'utf8'));
     if (lido) {
       doc = lido;
-    } else {
-      const copia = `${arquivo}.ilegivel-${Date.now()}`;
-      fs.renameSync(arquivo, copia);
-      console.error(`Arquivo de dados ilegível guardado em ${copia}; começando com o cronograma vazio.`);
+      versaoNoDisco = estado.mtimeMs;
+      return;
     }
+    const copia = `${arquivo}.ilegivel-${Date.now()}`;
+    fs.renameSync(arquivo, copia);
+    console.error(`Arquivo de dados ilegível guardado em ${copia}; começando com o cronograma vazio.`);
+    doc = { revisao: 0, idGravacao: null, titulo: 'Meu cronograma', tarefas: [] };
+    versaoNoDisco = null;
   }
+
+  lerDoDisco();
   return {
-    atual: () => doc,
+    atual() {
+      lerDoDisco();
+      return doc;
+    },
     gravar(novo) {
-      const temporario = `${arquivo}.tmp`;
+      const temporario = `${arquivo}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
       const fd = fs.openSync(temporario, 'w');
       try {
         fs.writeFileSync(fd, JSON.stringify(novo));
@@ -72,12 +118,13 @@ function criarArmazenamento(pasta) {
       }
       fs.renameSync(temporario, arquivo);
       doc = novo;
+      versaoNoDisco = fs.statSync(arquivo).mtimeMs;
     },
   };
 }
 
-function criarAutenticacao(senha) {
-  const chave = crypto.createHash('sha256').update(`cronograma-sessao:${senha}`).digest();
+function criarAutenticacao(senha, segredo) {
+  const chave = crypto.createHmac('sha256', segredo).update(senha).digest();
   const resumoSenha = crypto.createHash('sha256').update(senha).digest();
   const falhas = new Map();
   const assinar = (expira) => crypto.createHmac('sha256', chave).update(expira).digest('base64url');
@@ -101,7 +148,7 @@ function criarAutenticacao(senha) {
       const registro = falhas.get(ip);
       return Boolean(registro && registro.n >= MAX_FALHAS_LOGIN && agora < registro.ate);
     },
-    registrarFalha(ip, agora) {
+    registrarTentativa(ip, agora) {
       const registro = falhas.get(ip);
       const n = registro && agora < registro.ate ? registro.n : 0;
       falhas.set(ip, { n: n + 1, ate: agora + JANELA_FALHAS_MS });
@@ -131,7 +178,7 @@ function cookieSessao(req, valor, maxAge) {
   return `sessao=${valor}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${https ? '; Secure' : ''}`;
 }
 
-function lerJson(req) {
+function lerJson(req, limite = LIMITE_CORPO) {
   if (!/^application\/json\b/.test(req.headers['content-type'] || '')) {
     return Promise.reject(new ErroHttp(415, 'Envie os dados como JSON.'));
   }
@@ -140,10 +187,10 @@ function lerJson(req) {
     let tamanho = 0;
     req.on('data', (parte) => {
       tamanho += parte.length;
-      if (tamanho <= LIMITE_CORPO) partes.push(parte);
+      if (tamanho <= limite) partes.push(parte);
     });
     req.on('end', () => {
-      if (tamanho > LIMITE_CORPO) return recusar(new ErroHttp(413, 'Dados grandes demais.'));
+      if (tamanho > limite) return recusar(new ErroHttp(413, 'Dados grandes demais.'));
       try {
         aceitar(JSON.parse(Buffer.concat(partes).toString('utf8')));
       } catch {
@@ -175,19 +222,18 @@ function servirArquivo(req, res, caminho) {
 function criarServidor({ senha, pastaDados }) {
   if (!senha) throw new Error('Defina a variável de ambiente SENHA com a senha de acesso ao cronograma.');
   if (senha.length < 8) throw new Error('A SENHA precisa ter pelo menos 8 caracteres.');
+  verificarEscrita(pastaDados);
   const armazenamento = criarArmazenamento(pastaDados);
-  const auth = criarAutenticacao(senha);
+  const auth = criarAutenticacao(senha, lerOuCriarSegredo(pastaDados));
   const agoraS = () => Math.floor(Date.now() / 1000);
 
   async function entrar(req, res) {
     const ip = ipDe(req);
     if (auth.bloqueado(ip, Date.now())) throw new ErroHttp(429, 'Muitas tentativas. Aguarde alguns minutos e tente de novo.');
-    const corpo = await lerJson(req);
+    auth.registrarTentativa(ip, Date.now());
+    const corpo = await lerJson(req, LIMITE_CORPO_LOGIN);
     const tentativa = typeof corpo?.senha === 'string' ? corpo.senha : '';
-    if (!auth.senhaConfere(tentativa)) {
-      auth.registrarFalha(ip, Date.now());
-      throw new ErroHttp(401, 'Senha incorreta.');
-    }
+    if (!auth.senhaConfere(tentativa)) throw new ErroHttp(401, 'Senha incorreta.');
     auth.esquecerFalhas(ip);
     responderJson(res, 200, { ok: true }, { 'Set-Cookie': cookieSessao(req, auth.criarToken(agoraS()), DURACAO_SESSAO_S) });
   }
@@ -201,7 +247,7 @@ function criarServidor({ senha, pastaDados }) {
     }
     const r = Cronograma.importarDados(JSON.stringify({ titulo: corpo.titulo, tarefas: corpo.tarefas }));
     if (!r.ok) throw new ErroHttp(400, r.erro);
-    const novo = { revisao: atual.revisao + 1, ...r.dados };
+    const novo = { revisao: atual.revisao + 1, idGravacao: idGravacaoValido(corpo.idGravacao), ...r.dados };
     armazenamento.gravar(novo);
     responderJson(res, 200, { revisao: novo.revisao });
   }

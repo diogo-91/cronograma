@@ -65,7 +65,7 @@ test('cronograma novo começa vazio na revisão 0', async (t) => {
   const { cookie } = await entrar(base);
   const r = await api(base, cookie);
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { revisao: 0, titulo: 'Meu cronograma', tarefas: [] });
+  assert.deepEqual(await r.json(), { revisao: 0, idGravacao: null, titulo: 'Meu cronograma', tarefas: [] });
 });
 
 test('PUT grava, incrementa a revisão e persiste entre reinícios do servidor', async (t) => {
@@ -177,4 +177,71 @@ test('servidor exige senha com pelo menos 8 caracteres', () => {
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'cronograma-'));
   assert.throws(() => criarServidor({ senha: undefined, pastaDados: pasta }), /SENHA/);
   assert.throws(() => criarServidor({ senha: 'curta', pastaDados: pasta }), /8 caracteres/);
+});
+
+function loginLento(base, senha, ip) {
+  const url = new URL(`${base}/api/login`);
+  const corpo = JSON.stringify({ senha });
+  const req = http.request({
+    hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(corpo), 'X-Forwarded-For': ip },
+  });
+  const resposta = new Promise((ok, falha) => {
+    req.on('response', (r) => { r.resume(); ok(r.statusCode); });
+    req.on('error', falha);
+  });
+  req.flushHeaders();
+  return { enviarCorpo: () => req.end(corpo), resposta };
+}
+
+test('limite de tentativas vale também para pedidos simultâneos', async (t) => {
+  const { base } = await subir(t);
+  const ip = '203.0.113.50';
+  const pedidos = Array.from({ length: 20 }, () => loginLento(base, 'chute', ip));
+  await new Promise((pronto) => setTimeout(pronto, 150));
+  pedidos.forEach((p) => p.enviarCorpo());
+  const status = await Promise.all(pedidos.map((p) => p.resposta));
+  assert.ok(status.filter((s) => s === 401).length <= 5, `respostas: ${status.join(',')}`);
+  assert.equal((await entrar(base, { cabecalhos: { 'X-Forwarded-For': ip } })).status, 429);
+});
+
+test('login recusa corpo maior que 1 KB', async (t) => {
+  const { base } = await subir(t);
+  assert.equal((await entrar(base, { senha: 'x'.repeat(2000) })).status, 413);
+});
+
+test('sessão é assinada com segredo do servidor, não só com a senha', async (t) => {
+  const primeiro = await subir(t);
+  const { cookie } = await entrar(primeiro.base);
+  await primeiro.fechar();
+  const mesmaPasta = await subir(t, { pasta: primeiro.pasta });
+  assert.equal((await api(mesmaPasta.base, cookie)).status, 200, 'sessão sobrevive ao reinício');
+  const outraPasta = await subir(t);
+  assert.equal((await api(outraPasta.base, cookie)).status, 401, 'mesma senha, outro segredo: cookie não vale');
+  const segredo = fs.statSync(path.join(primeiro.pasta, 'segredo-sessao'));
+  assert.equal(segredo.mode & 0o777, 0o600);
+});
+
+test('gravação guarda o idGravacao enviado e o devolve no conflito', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  await api(base, cookie, 'PUT', { revisaoBase: 0, idGravacao: 'envio-1', titulo: 'x', tarefas: [] });
+  assert.equal((await (await api(base, cookie)).json()).idGravacao, 'envio-1');
+  const conflito = await api(base, cookie, 'PUT', { revisaoBase: 0, idGravacao: 'envio-2', titulo: 'y', tarefas: [] });
+  assert.equal(conflito.status, 409);
+  assert.equal((await conflito.json()).atual.idGravacao, 'envio-1');
+  await api(base, cookie, 'PUT', { revisaoBase: 1, idGravacao: '<script>', titulo: 'z', tarefas: [] });
+  assert.equal((await (await api(base, cookie)).json()).idGravacao, null);
+});
+
+test('dois processos no mesmo volume enxergam as gravações um do outro', async (t) => {
+  const a = await subir(t);
+  const b = await subir(t, { pasta: a.pasta });
+  const sessaoA = await entrar(a.base);
+  const sessaoB = await entrar(b.base);
+  assert.equal((await api(a.base, sessaoA.cookie, 'PUT', { revisaoBase: 0, titulo: 'Pelo A', tarefas: [TAREFA] })).status, 200);
+  const vistoPorB = await (await api(b.base, sessaoB.cookie)).json();
+  assert.equal(vistoPorB.revisao, 1);
+  assert.equal(vistoPorB.titulo, 'Pelo A');
+  assert.equal((await api(b.base, sessaoB.cookie, 'PUT', { revisaoBase: 0, titulo: 'Pelo B', tarefas: [] })).status, 409);
 });
