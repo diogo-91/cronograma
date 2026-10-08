@@ -24,6 +24,13 @@ fs.mkdirSync(OUT, { recursive: true });
   const { ctx, page } = await nova({ viewport: { width: 1366, height: 860 } });
   await page.goto(URL_APP);
   assert.ok(await page.isVisible('text=Seu cronograma está vazio'), 'estado vazio');
+  const logo = async (pg, onde) => {
+    assert.equal(await pg.textContent('.marca-nome'), 'GoldSystem', `${onde}: nome da logo`);
+    assert.ok(await pg.isVisible('.marca'), `${onde}: logo visível`);
+    assert.ok(await pg.evaluate(() => document.querySelector('.marca-icone').naturalWidth > 0), `${onde}: ícone da logo carregou`);
+    assert.equal(await pg.getAttribute('link[rel=icon]', 'href'), 'img/logo-goldsystem.svg', `${onde}: favicon`);
+  };
+  await logo(page, 'desktop');
   await page.screenshot({ path: path.join(OUT, '01-vazio-desktop.png') });
 
   await page.click('text=Ver um exemplo');
@@ -147,11 +154,13 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.equal(await page.evaluate(() => window.__xss), undefined);
   assert.equal(await page.locator('.tabela img').count(), 0);
 
-  // ---------- Dark mode ----------
-  const dark = await nova({ viewport: { width: 1366, height: 860 }, colorScheme: 'dark' });
-  await dark.page.goto(URL_APP);
-  await dark.page.click('text=Ver um exemplo');
-  await dark.page.screenshot({ path: path.join(OUT, '07-gantt-dark.png') });
+  // ---------- Sistema em modo escuro: a página continua clara ----------
+  const escuro = await nova({ viewport: { width: 1366, height: 860 }, colorScheme: 'dark' });
+  await escuro.page.goto(URL_APP);
+  await escuro.page.click('text=Ver um exemplo');
+  assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(246, 247, 251)');
+  assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.querySelector('.topo')).backgroundColor), 'rgb(255, 255, 255)');
+  await escuro.page.screenshot({ path: path.join(OUT, '07-tema-claro-com-sistema-escuro.png') });
 
   // ---------- Mobile ----------
   for (const [nome, vp] of [['mobile-360', { width: 360, height: 740 }], ['mobile-390', { width: 390, height: 844 }], ['tablet-768', { width: 768, height: 1024 }]]) {
@@ -162,6 +171,7 @@ fs.mkdirSync(OUT, { recursive: true });
       assert.ok(r.sw <= r.iw, `${nome}/${etapa}: rolagem horizontal na página (${r.sw} > ${r.iw})`);
     };
     await semOverflow('vazio');
+    await logo(m.page, nome);
     await m.page.screenshot({ path: path.join(OUT, `10-${nome}-vazio.png`) });
     await m.page.click('text=Ver um exemplo');
     await semOverflow('gantt');

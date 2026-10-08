@@ -9,6 +9,7 @@
   --texto-suave: #5d6578;
   --primaria: #4256d6;
   --primaria-texto: #ffffff;
+  --ouro-texto: #9a6f0c;
   --foco: rgba(66, 86, 214, 0.35);
   --perigo: #c8323c;
   --hoje: #e5484d;
@@ -34,41 +35,7 @@
   --altura-linha: 44px;
   --raio: 12px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  color-scheme: light dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fundo: #14161c;
-    --superficie: #1c1f27;
-    --superficie-2: #252935;
-    --borda: #323746;
-    --grade: #272b37;
-    --fds: rgba(255, 255, 255, 0.03);
-    --texto: #e8eaf1;
-    --texto-suave: #a0a7b8;
-    --primaria: #7186ff;
-    --primaria-texto: #0e1120;
-    --foco: rgba(113, 134, 255, 0.4);
-    --perigo: #ff6b73;
-    --hoje: #ff6b6f;
-    --sombra: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.25);
-
-    --st-pendente: #9aa2b4;
-    --st-andamento: #6ea1ff;
-    --st-atrasada: #ff6b73;
-    --st-concluida: #4cc77f;
-
-    --fase-0: #7389ff;
-    --fase-1: #2cc0b0;
-    --fase-2: #f39a4a;
-    --fase-3: #ec6b97;
-    --fase-4: #a28bff;
-    --fase-5: #5cc06b;
-    --fase-6: #d6a83a;
-    --fase-7: #5bb3ec;
-    --fase-sem: #8e97a8;
-  }
+  color-scheme: light;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -97,16 +64,30 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 /* Topo */
 
 .topo {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "marca titulo acoes";
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 12px 20px;
   padding: 14px 24px;
   background: var(--superficie);
   border-bottom: 1px solid var(--borda);
 }
 
-.topo-titulo { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.marca {
+  grid-area: marca;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 20px;
+  border-right: 1px solid var(--borda);
+}
+
+.marca-icone { display: block; width: 34px; height: 34px; }
+.marca-nome { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }
+.marca-ouro { color: var(--ouro-texto); }
+
+.topo-titulo { grid-area: titulo; min-width: 0; display: flex; flex-direction: column; }
 
 .titulo {
   width: 100%;
@@ -126,7 +107,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .salvo { font-size: 0.78rem; color: var(--texto-suave); }
 .salvo.falhou { color: var(--perigo); font-weight: 600; }
 
-.topo-acoes { display: flex; gap: 8px; align-items: center; }
+.topo-acoes { grid-area: acoes; display: flex; gap: 8px; align-items: center; }
 
 /* Botões e campos */
 
@@ -579,7 +560,14 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
 @media (max-width: 760px) {
   :root { --col-nome: 128px; --altura-linha: 48px; }
 
-  .topo { padding: 10px 16px; }
+  .topo {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "marca acoes" "titulo titulo";
+    gap: 8px 12px;
+    padding: 10px 16px 8px;
+  }
+  .marca { padding-right: 0; border-right: 0; }
+  .marca-icone { width: 30px; height: 30px; }
   .titulo { font-size: 1.1rem; }
   .conteudo { padding: 14px 16px 96px; }
 

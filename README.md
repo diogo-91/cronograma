@@ -1,4 +1,4 @@
-# Cronograma
+# Cronograma · GoldSystem
 
 Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com datas de início e término, gráfico de Gantt, lista, filtros e exportação. Funciona no computador e no celular, sem servidor e sem cadastro.
 
@@ -16,7 +16,7 @@ Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com 
 - Resumo com progresso geral ponderado pela duração, contagem por status e período total.
 - Busca (ignora acentos e maiúsculas) e filtros por fase e status.
 - **Arquivo:** backup em JSON (exportar/importar), exportação CSV para Excel (separador `;`, datas dd/mm/aaaa), impressão / PDF.
-- Tema claro e escuro automático.
+- Tema claro, com a marca GoldSystem no topo e no ícone da aba.
 
 ## Onde ficam os dados
 
@@ -29,7 +29,8 @@ Não há build: HTML, CSS e JavaScript puros.
 ```
 js/cronograma.js   lógica pura (datas, status, validação, filtros, resumo, escala do Gantt, CSV, importação)
 js/app.js          interface (renderização, diálogo, armazenamento, importar/exportar)
-css/styles.css     layout responsivo, tema claro/escuro e impressão
+css/styles.css     layout responsivo, tema e impressão
+img/               logo GoldSystem (topo e favicon)
 tests/             testes unitários da lógica (node:test)
 e2e/               teste ponta a ponta no navegador (Playwright)
 ```
@@ -38,6 +39,6 @@ e2e/               teste ponta a ponta no navegador (Playwright)
 npm test                          # testes unitários, sem dependências
 npm install                       # instala o Playwright para o teste E2E
 npx playwright install chromium   # baixa o navegador, se ainda não tiver
-npm run test:e2e                  # desktop, modo escuro e celular (360, 390, 768 px); prints em e2e/saida/
+npm run test:e2e                  # desktop, sistema em modo escuro e celular (360, 390, 768 px); prints em e2e/saida/
 npm start                         # servidor local opcional
 ```
