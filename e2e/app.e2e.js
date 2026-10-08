@@ -245,7 +245,7 @@ fs.mkdirSync(OUT, { recursive: true });
     await m.page.screenshot({ path: path.join(OUT, `13-${nome}-dialogo.png`) });
     await m.page.click('#dialogo [data-fechar].btn');
     await m.page.click('#menu summary');
-    const menu = await m.page.locator('.menu-itens').boundingBox();
+    const menu = await m.page.locator('#menu .menu-itens').boundingBox();
     assert.ok(menu.x >= 0, `${nome}: menu sai pela esquerda (x=${menu.x})`);
     await m.page.screenshot({ path: path.join(OUT, `14-${nome}-menu.png`) });
   }
@@ -330,12 +330,12 @@ fs.mkdirSync(OUT, { recursive: true });
   // sem rede: nada de "Atividade salva" falso; envia quando a conexão volta
   const rede = await nova({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
   await entrar(rede.page, await novoServidor());
-  await rede.page.route('**/api/cronograma', (r) => (r.request().method() === 'PUT' ? r.abort() : r.continue()));
+  await rede.page.route('**/api/empresas/*', (r) => (r.request().method() === 'PUT' ? r.abort() : r.continue()));
   await salvarTarefa(rede.page, 'Sem rede');
   await rede.page.waitForFunction(() => document.querySelector('#salvo').textContent.startsWith('Sem conexão'));
   assert.match(await rede.page.textContent('#anuncio'), /Sem conexão com o servidor/);
   assert.equal(await rede.page.isVisible('#salvo'), true, 'indicador de falha visível em 360px');
-  await rede.page.unroute('**/api/cronograma');
+  await rede.page.unroute('**/api/empresas/*');
   await rede.page.evaluate(() => window.dispatchEvent(new Event('online')));
   await aguardarSalvo(rede.page);
   await rede.page.reload();
@@ -372,7 +372,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
   // endereço servindo só os arquivos (Build Pack errado) explica o que fazer
   const semApi = await nova({ viewport: { width: 1366, height: 860 } });
-  await semApi.page.route('**/api/cronograma', (r) => r.fulfill({ status: 404, contentType: 'text/html', body: '<h1>404</h1>' }));
+  await semApi.page.route('**/api/empresas', (r) => r.fulfill({ status: 404, contentType: 'text/html', body: '<h1>404</h1>' }));
   await semApi.page.goto(URL_A);
   await semApi.page.waitForSelector('text=Servidor do cronograma não encontrado');
   assert.equal(await semApi.page.isVisible('#btn-nova'), false);
@@ -381,7 +381,7 @@ fs.mkdirSync(OUT, { recursive: true });
   const perda = await nova({ viewport: { width: 1366, height: 860 } });
   await entrar(perda.page, await novoServidor());
   let perderResposta = true;
-  await perda.page.route('**/api/cronograma', async (r) => {
+  await perda.page.route('**/api/empresas/*', async (r) => {
     if (r.request().method() !== 'PUT' || !perderResposta) return r.continue();
     perderResposta = false;
     await r.fetch();
@@ -392,19 +392,19 @@ fs.mkdirSync(OUT, { recursive: true });
   await salvarTarefa(perda.page, 'C depois da falha');
   await aguardarSalvo(perda.page);
   assert.doesNotMatch(await perda.page.textContent('#anuncio'), /outro aparelho/);
-  await perda.page.unroute('**/api/cronograma');
+  await perda.page.unroute('**/api/empresas/*');
   await perda.page.reload();
   await perda.page.waitForSelector('body[data-tela="app"]');
   assert.deepEqual((await perda.page.locator('.g-nome-texto').allTextContents()).sort(), ['B gravada sem resposta', 'C depois da falha']);
 
   // servidor recusou os dados: o indicador não diz "Salvo no servidor"; importação grande é barrada antes
-  await perda.page.route('**/api/cronograma', (r) => (r.request().method() === 'PUT'
+  await perda.page.route('**/api/empresas/*', (r) => (r.request().method() === 'PUT'
     ? r.fulfill({ status: 413, contentType: 'application/json', body: JSON.stringify({ erro: 'Dados grandes demais.' }) })
     : r.continue()));
   await salvarTarefa(perda.page, 'Recusada');
   await perda.page.waitForFunction(() => document.querySelector('#salvo').textContent.startsWith('Não salvo'));
   assert.match(await perda.page.textContent('#anuncio'), /recusou/);
-  await perda.page.unroute('**/api/cronograma');
+  await perda.page.unroute('**/api/empresas/*');
   const grande = path.join(OUT, 'grande.json');
   fs.writeFileSync(grande, JSON.stringify({
     titulo: 'Grande',
@@ -418,7 +418,7 @@ fs.mkdirSync(OUT, { recursive: true });
   const lento = await nova({ viewport: { width: 1366, height: 860 } });
   await entrar(lento.page, URL_LENTO);
   let atrasarGet = true;
-  await lento.page.route('**/api/cronograma', async (r) => {
+  await lento.page.route('**/api/empresas/*', async (r) => {
     if (r.request().method() !== 'GET' || !atrasarGet) return r.continue();
     atrasarGet = false;
     const antiga = await r.fetch();
@@ -433,7 +433,7 @@ fs.mkdirSync(OUT, { recursive: true });
   await salvarTarefa(lento.page, 'E depois');
   await aguardarSalvo(lento.page);
   assert.doesNotMatch(await lento.page.textContent('#anuncio'), /outro aparelho/);
-  await lento.page.unroute('**/api/cronograma');
+  await lento.page.unroute('**/api/empresas/*');
 
   // edição feita durante um envio que termina em conflito não ganha aviso falso de sucesso depois
   const outroLento = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -448,7 +448,7 @@ fs.mkdirSync(OUT, { recursive: true });
     })
       .observe(document.querySelector('#anuncio'), { childList: true, characterData: true, subtree: true });
   });
-  await lento.page.route('**/api/cronograma', async (r) => {
+  await lento.page.route('**/api/empresas/*', async (r) => {
     if (r.request().method() === 'PUT') await new Promise((ok) => setTimeout(ok, 1500));
     return r.continue();
   });
@@ -456,7 +456,7 @@ fs.mkdirSync(OUT, { recursive: true });
   await lento.page.waitForTimeout(700);
   await lento.page.click('[aria-label="Duplicar E depois"]');
   await aguardarAnuncio(lento.page, 'outro aparelho');
-  await lento.page.unroute('**/api/cronograma');
+  await lento.page.unroute('**/api/empresas/*');
   await salvarTarefa(lento.page, 'Z depois do conflito');
   await aguardarSalvo(lento.page);
   await lento.page.waitForTimeout(300);
@@ -469,7 +469,7 @@ fs.mkdirSync(OUT, { recursive: true });
   await sessao.ctx.clearCookies();
   await salvarTarefa(sessao.page, 'Pendente B');
   await sessao.page.waitForSelector('body[data-tela="login"]');
-  await sessao.page.route('**/api/cronograma', async (r) => {
+  await sessao.page.route('**/api/empresas/*', async (r) => {
     if (r.request().method() !== 'PUT') return r.continue();
     const resposta = await r.fetch();
     await new Promise((ok) => setTimeout(ok, 1500));
@@ -485,6 +485,56 @@ fs.mkdirSync(OUT, { recursive: true });
   await sessao.page.reload();
   await sessao.page.waitForSelector('body[data-tela="app"]');
   assert.equal(await sessao.page.locator('.g-nome-texto:has-text("Pendente B")').count(), 1, 'pendente chegou ao servidor');
+
+  // empresas: cada uma com seu cronograma, troca pelo menu, outro aparelho vê as mesmas
+  const URL_EMPRESAS = await novoServidor();
+  const emp = await nova({ viewport: { width: 1366, height: 860 } });
+  await entrar(emp.page, URL_EMPRESAS);
+  assert.equal(await emp.page.inputValue('#titulo'), 'Minha empresa');
+  await salvarTarefa(emp.page, 'Tarefa da primeira');
+  await aguardarSalvo(emp.page);
+  await emp.page.click('#menu-empresas summary');
+  await emp.page.click('#btn-nova-empresa');
+  await emp.page.click('#form-empresa button[type=submit]');
+  assert.equal(await emp.page.textContent('#e-empresa'), 'Informe o nome da empresa.');
+  await emp.page.fill('#f-empresa', 'Construtora Alfa');
+  await emp.page.click('#form-empresa button[type=submit]');
+  await emp.page.waitForFunction(() => document.querySelector('#titulo').value === 'Construtora Alfa');
+  assert.ok(await emp.page.isVisible('text=Seu cronograma está vazio'), 'empresa nova começa vazia');
+  await salvarTarefa(emp.page, 'Tarefa da Alfa');
+  await aguardarSalvo(emp.page);
+  await emp.page.click('#menu-empresas summary');
+  await emp.page.screenshot({ path: path.join(OUT, '15-menu-empresas-desktop.png') });
+  await emp.page.click('#lista-empresas button:has-text("Minha empresa")');
+  await emp.page.waitForFunction(() => document.querySelector('#titulo').value === 'Minha empresa');
+  assert.deepEqual(await emp.page.locator('.g-nome-texto').allTextContents(), ['Tarefa da primeira']);
+  await emp.page.fill('#titulo', 'Padaria Sol');
+  await emp.page.press('#titulo', 'Enter');
+  await aguardarSalvo(emp.page);
+
+  const emp2 = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  await entrar(emp2.page, URL_EMPRESAS);
+  await emp2.page.click('#menu-empresas summary');
+  assert.deepEqual(await emp2.page.locator('#lista-empresas .empresa-nome').allTextContents(), ['Padaria Sol', 'Construtora Alfa']);
+  const menuCelular = await emp2.page.locator('#menu-empresas .menu-itens').boundingBox();
+  assert.ok(menuCelular.x >= 0 && menuCelular.x + menuCelular.width <= 390, `menu de empresas cabe na tela (${menuCelular.x}, ${menuCelular.width})`);
+  await emp2.page.screenshot({ path: path.join(OUT, '16-menu-empresas-celular.png') });
+  await emp2.page.click('#lista-empresas button:has-text("Construtora Alfa")');
+  await emp2.page.waitForFunction(() => document.querySelector('#titulo').value === 'Construtora Alfa');
+  assert.deepEqual(await emp2.page.locator('.g-nome-texto').allTextContents(), ['Tarefa da Alfa']);
+  await emp2.page.reload();
+  await emp2.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await emp2.page.inputValue('#titulo'), 'Construtora Alfa', 'aparelho lembra a última empresa aberta');
+
+  await emp2.page.click('#menu summary');
+  await emp2.page.click('[data-acao=excluir-empresa]');
+  await aguardarAnuncio(emp2.page, 'Empresa excluída.');
+  assert.equal(await emp2.page.inputValue('#titulo'), 'Padaria Sol');
+  await emp.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await emp.page.waitForFunction(() => document.querySelectorAll('#lista-empresas button').length === 1);
+  await emp.page.click('#menu summary');
+  await emp.page.click('[data-acao=excluir-empresa]');
+  await aguardarAnuncio(emp.page, 'única empresa');
 
   // sair volta para a tela de senha
   await page.click('#menu summary');
@@ -508,4 +558,7 @@ fs.mkdirSync(OUT, { recursive: true });
   }
   assert.deepEqual(erros, [], 'sem erros no console');
   console.log('E2E OK');
-})().catch((e) => { console.error('E2E FALHOU:', e.message); process.exit(1); });
+})().catch((e) => {
+  console.error('E2E FALHOU:', e.message, (e.stack.match(/app\.e2e\.js:\d+/) || [''])[0]);
+  process.exit(1);
+});

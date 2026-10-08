@@ -5,7 +5,13 @@ const crypto = require('node:crypto');
 const Cronograma = require('./js/cronograma.js');
 
 const RAIZ = __dirname;
-const NOME_ARQUIVO_DADOS = 'cronograma.json';
+const NOME_ARQUIVO_EMPRESAS = 'empresas.json';
+const NOME_ARQUIVO_LEGADO = 'cronograma.json';
+const NOME_PADRAO_EMPRESA = 'Minha empresa';
+const MAX_NOME_EMPRESA = 80;
+const MAX_EMPRESAS = 500;
+const ID_EMPRESA = /^[\w-]{1,64}$/;
+const ROTA_EMPRESA = /^\/api\/empresas\/([\w-]{1,64})$/;
 const NOME_ARQUIVO_SEGREDO = 'segredo-sessao';
 const LIMITE_CORPO = 2 * 1024 * 1024;
 const LIMITE_CORPO_LOGIN = 1024;
@@ -74,10 +80,45 @@ function lerOuCriarSegredo(pasta) {
   }
 }
 
+function nomeValido(valor) {
+  const nome = typeof valor === 'string' ? valor.trim() : '';
+  return nome && nome.length <= MAX_NOME_EMPRESA ? nome : null;
+}
+
+function novaEmpresa(nome, extras = {}) {
+  return { id: Cronograma.novoId(), nome, revisao: 0, idGravacao: null, tarefas: [], ...extras };
+}
+
+function lerEmpresas(texto) {
+  let bruto;
+  try {
+    bruto = JSON.parse(texto);
+  } catch {
+    return null;
+  }
+  if (!bruto || !Array.isArray(bruto.empresas) || !bruto.empresas.length) return null;
+  const empresas = [];
+  for (const e of bruto.empresas) {
+    const nome = nomeValido(e?.nome);
+    if (!nome || typeof e.id !== 'string' || !ID_EMPRESA.test(e.id) || !Number.isInteger(e.revisao) || e.revisao < 0) return null;
+    const r = Cronograma.importarDados(JSON.stringify({ titulo: nome, tarefas: e.tarefas }));
+    if (!r.ok) return null;
+    empresas.push({ id: e.id, nome, revisao: e.revisao, idGravacao: idGravacaoValido(e.idGravacao), tarefas: r.dados.tarefas });
+  }
+  return { empresas };
+}
+
 function criarArmazenamento(pasta) {
-  const arquivo = path.join(pasta, NOME_ARQUIVO_DADOS);
-  let doc = { revisao: 0, idGravacao: null, titulo: 'Meu cronograma', tarefas: [] };
+  const arquivo = path.join(pasta, NOME_ARQUIVO_EMPRESAS);
+  const legado = path.join(pasta, NOME_ARQUIVO_LEGADO);
+  let doc = null;
   let versaoNoDisco = null;
+
+  function guardarIlegivel(caminho) {
+    const copia = `${caminho}.ilegivel-${Date.now()}`;
+    fs.renameSync(caminho, copia);
+    console.error(`Arquivo de dados ilegível guardado em ${copia}.`);
+  }
 
   function lerDoDisco() {
     let estado;
@@ -88,39 +129,55 @@ function criarArmazenamento(pasta) {
       throw erro;
     }
     if (estado.mtimeMs === versaoNoDisco) return;
-    const lido = lerDocumento(fs.readFileSync(arquivo, 'utf8'));
+    const lido = lerEmpresas(fs.readFileSync(arquivo, 'utf8'));
     if (lido) {
       doc = lido;
       versaoNoDisco = estado.mtimeMs;
       return;
     }
-    const copia = `${arquivo}.ilegivel-${Date.now()}`;
-    fs.renameSync(arquivo, copia);
-    console.error(`Arquivo de dados ilegível guardado em ${copia}; começando com o cronograma vazio.`);
-    doc = { revisao: 0, idGravacao: null, titulo: 'Meu cronograma', tarefas: [] };
+    guardarIlegivel(arquivo);
+    doc = null;
     versaoNoDisco = null;
   }
 
-  lerDoDisco();
-  return {
-    atual() {
-      lerDoDisco();
-      return doc;
-    },
-    gravar(novo) {
-      const temporario = `${arquivo}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
-      const fd = fs.openSync(temporario, 'w');
-      try {
-        fs.writeFileSync(fd, JSON.stringify(novo));
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
+  function gravar(novo) {
+    const temporario = `${arquivo}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
+    const fd = fs.openSync(temporario, 'w');
+    try {
+      fs.writeFileSync(fd, JSON.stringify(novo));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temporario, arquivo);
+    doc = novo;
+    versaoNoDisco = fs.statSync(arquivo).mtimeMs;
+  }
+
+  function inicializar() {
+    let primeira = novaEmpresa(NOME_PADRAO_EMPRESA);
+    if (fs.existsSync(legado)) {
+      const antigo = lerDocumento(fs.readFileSync(legado, 'utf8'));
+      if (antigo) {
+        const nome = antigo.titulo.trim().slice(0, MAX_NOME_EMPRESA) || NOME_PADRAO_EMPRESA;
+        primeira = novaEmpresa(nome, { revisao: antigo.revisao, idGravacao: antigo.idGravacao, tarefas: antigo.tarefas });
       }
-      fs.renameSync(temporario, arquivo);
-      doc = novo;
-      versaoNoDisco = fs.statSync(arquivo).mtimeMs;
-    },
-  };
+      gravar({ empresas: [primeira] });
+      if (antigo) fs.renameSync(legado, `${legado}.migrado`);
+      else guardarIlegivel(legado);
+      return;
+    }
+    gravar({ empresas: [primeira] });
+  }
+
+  function atual() {
+    lerDoDisco();
+    if (!doc) inicializar();
+    return doc;
+  }
+
+  atual();
+  return { atual, gravar };
 }
 
 function criarAutenticacao(senha, segredo) {
@@ -238,18 +295,59 @@ function criarServidor({ senha, pastaDados }) {
     responderJson(res, 200, { ok: true }, { 'Set-Cookie': cookieSessao(req, auth.criarToken(agoraS()), DURACAO_SESSAO_S) });
   }
 
-  async function salvar(req, res) {
+  function buscarEmpresa(id) {
+    const empresa = armazenamento.atual().empresas.find((e) => e.id === id);
+    if (!empresa) throw new ErroHttp(404, 'Empresa não encontrada. Ela pode ter sido excluída em outro aparelho.');
+    return empresa;
+  }
+
+  function cronogramaDa(empresa) {
+    return { revisao: empresa.revisao, idGravacao: empresa.idGravacao, titulo: empresa.nome, tarefas: empresa.tarefas };
+  }
+
+  function listarEmpresas(res) {
+    const empresas = armazenamento.atual().empresas.map((e) => ({ id: e.id, nome: e.nome, atividades: e.tarefas.length }));
+    responderJson(res, 200, { empresas });
+  }
+
+  async function criarEmpresa(req, res) {
+    const corpo = await lerJson(req, LIMITE_CORPO_LOGIN);
+    const nome = nomeValido(corpo?.nome);
+    if (!nome) throw new ErroHttp(400, `Informe o nome da empresa (até ${MAX_NOME_EMPRESA} caracteres).`);
+    const { empresas } = armazenamento.atual();
+    if (empresas.length >= MAX_EMPRESAS) throw new ErroHttp(400, `Limite de ${MAX_EMPRESAS} empresas atingido.`);
+    const nova = novaEmpresa(nome);
+    armazenamento.gravar({ empresas: [...empresas, nova] });
+    responderJson(res, 201, { id: nova.id, nome: nova.nome });
+  }
+
+  async function salvar(req, res, id) {
     const corpo = await lerJson(req);
     if (!corpo || typeof corpo !== 'object') throw new ErroHttp(400, 'Dados inválidos.');
-    const atual = armazenamento.atual();
-    if (corpo.revisaoBase !== atual.revisao) {
-      return responderJson(res, 409, { erro: 'O cronograma foi alterado em outro aparelho.', atual });
+    const empresa = buscarEmpresa(id);
+    if (corpo.revisaoBase !== empresa.revisao) {
+      return responderJson(res, 409, { erro: 'O cronograma foi alterado em outro aparelho.', atual: cronogramaDa(empresa) });
     }
     const r = Cronograma.importarDados(JSON.stringify({ titulo: corpo.titulo, tarefas: corpo.tarefas }));
     if (!r.ok) throw new ErroHttp(400, r.erro);
-    const novo = { revisao: atual.revisao + 1, idGravacao: idGravacaoValido(corpo.idGravacao), ...r.dados };
-    armazenamento.gravar(novo);
-    responderJson(res, 200, { revisao: novo.revisao });
+    const atualizada = {
+      id,
+      nome: nomeValido(corpo.titulo) || empresa.nome,
+      revisao: empresa.revisao + 1,
+      idGravacao: idGravacaoValido(corpo.idGravacao),
+      tarefas: r.dados.tarefas,
+    };
+    const { empresas } = armazenamento.atual();
+    armazenamento.gravar({ empresas: empresas.map((e) => (e.id === id ? atualizada : e)) });
+    responderJson(res, 200, { revisao: atualizada.revisao });
+  }
+
+  function excluirEmpresa(res, id) {
+    buscarEmpresa(id);
+    const { empresas } = armazenamento.atual();
+    if (empresas.length === 1) throw new ErroHttp(409, 'Precisa existir pelo menos uma empresa.');
+    armazenamento.gravar({ empresas: empresas.filter((e) => e.id !== id) });
+    responderJson(res, 200, { ok: true });
   }
 
   return http.createServer(async (req, res) => {
@@ -260,8 +358,12 @@ function criarServidor({ senha, pastaDados }) {
       if (rota === 'POST /api/logout') return responderJson(res, 200, { ok: true }, { 'Set-Cookie': cookieSessao(req, '', 0) });
       if (caminho.startsWith('/api/')) {
         if (!auth.tokenValido(lerCookie(req, 'sessao'), agoraS())) throw new ErroHttp(401, 'Entre com a senha para continuar.');
-        if (rota === 'GET /api/cronograma') return responderJson(res, 200, armazenamento.atual());
-        if (rota === 'PUT /api/cronograma') return await salvar(req, res);
+        if (rota === 'GET /api/empresas') return listarEmpresas(res);
+        if (rota === 'POST /api/empresas') return await criarEmpresa(req, res);
+        const [, id] = ROTA_EMPRESA.exec(caminho) || [];
+        if (id && req.method === 'GET') return responderJson(res, 200, cronogramaDa(buscarEmpresa(id)));
+        if (id && req.method === 'PUT') return await salvar(req, res, id);
+        if (id && req.method === 'DELETE') return excluirEmpresa(res, id);
         throw new ErroHttp(404, 'Não encontrado.');
       }
       servirArquivo(req, res, caminho);

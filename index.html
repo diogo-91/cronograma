@@ -16,7 +16,18 @@
       <span class="marca-nome"><span class="marca-ouro">Gold</span>System</span>
     </div>
     <div class="topo-titulo">
-      <input id="titulo" class="titulo" type="text" maxlength="120" aria-label="Nome do cronograma" autocomplete="off">
+      <div class="empresa-linha">
+        <input id="titulo" class="titulo" type="text" maxlength="80" aria-label="Nome da empresa" autocomplete="off">
+        <details class="menu menu-empresas" id="menu-empresas">
+          <summary class="btn btn-empresas" title="Trocar de empresa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 8h3M8 12h3M8 16h3"/></svg><span>Empresas</span></summary>
+          <div class="menu-itens">
+            <div class="menu-rotulo">Empresas</div>
+            <div id="lista-empresas" class="lista-empresas"></div>
+            <hr>
+            <button type="button" id="btn-nova-empresa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nova empresa</button>
+          </div>
+        </details>
+      </div>
       <span class="salvo" id="salvo">Salvo no servidor</span>
     </div>
     <div class="topo-acoes">
@@ -30,7 +41,8 @@
           <hr>
           <button type="button" data-acao="exemplo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Carregar exemplo</button>
           <button type="button" data-acao="sair"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H4"/></svg>Sair</button>
-          <button type="button" data-acao="apagar-tudo" class="perigo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Apagar tudo</button>
+          <button type="button" data-acao="apagar-tudo" class="perigo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Apagar todas as atividades</button>
+          <button type="button" data-acao="excluir-empresa" class="perigo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Excluir esta empresa</button>
         </div>
       </details>
       <button type="button" class="btn primario btn-nova" id="btn-nova" aria-label="Nova atividade">
@@ -86,6 +98,27 @@
     <section id="vista-tabela" class="lista" aria-label="Lista de atividades"></section>
     <section id="vazio" class="vazio" hidden></section>
   </main>
+
+  <dialog id="dialogo-empresa" aria-labelledby="dialogo-empresa-titulo">
+    <form id="form-empresa" novalidate>
+      <header class="dialogo-topo">
+        <h2 id="dialogo-empresa-titulo">Nova empresa</h2>
+        <button type="button" class="btn-icone" data-fechar-empresa aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialogo-corpo">
+        <label class="rotulo" for="f-empresa">Nome da empresa</label>
+        <input id="f-empresa" name="nome" class="campo" type="text" maxlength="80" required autocomplete="off" aria-describedby="e-empresa">
+        <p class="erro" id="e-empresa"></p>
+      </div>
+      <footer class="dialogo-rodape">
+        <span class="espaco"></span>
+        <button type="button" class="btn" data-fechar-empresa>Cancelar</button>
+        <button type="submit" class="btn primario">Criar empresa</button>
+      </footer>
+    </form>
+  </dialog>
 
   <dialog id="dialogo" aria-labelledby="dialogo-titulo">
     <form id="form-tarefa" novalidate>

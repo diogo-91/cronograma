@@ -63,6 +63,10 @@
   let aguardandoEnvio = [];
   let temporizadorGravar = null;
   let geracaoSessao = 0;
+  let empresas = [];
+  let empresaAtual = null;
+  let empresaPreferida = null;
+  let nomeAntesDeEditar = '';
   const gravacoesSemResposta = new Set();
 
   function el(tag, props = {}, ...filhos) {
@@ -136,15 +140,49 @@
     estado.tarefas = doc.tarefas;
   }
 
-  async function carregarDoServidor() {
-    const r = await chamarApi('GET', 'api/cronograma');
-    if (r.status === 200) {
-      aplicarDocumento(r.dados);
-      return true;
-    }
-    if (r.status === 401) mostrarLogin();
-    else mostrarFalhaConexao(r.status);
+  function tratarFalhaDeCarga(status) {
+    if (status === 401) mostrarLogin();
+    else mostrarFalhaConexao(status);
     return false;
+  }
+
+  async function carregarDoServidor(idDesejado) {
+    const lista = await chamarApi('GET', 'api/empresas');
+    if (lista.status !== 200) return tratarFalhaDeCarga(lista.status);
+    empresas = lista.dados.empresas;
+    const existe = (id) => empresas.some((e) => e.id === id);
+    const id = [idDesejado, empresaAtual, empresaPreferida].find(existe) || empresas[0].id;
+    const r = await chamarApi('GET', `api/empresas/${id}`);
+    if (r.status !== 200) return tratarFalhaDeCarga(r.status);
+    empresaAtual = id;
+    salvarPrefs();
+    aplicarDocumento(r.dados);
+    return true;
+  }
+
+  async function trocarEmpresa(id) {
+    $('#menu-empresas').open = false;
+    if (id === empresaAtual) return;
+    if (alteracoesPendentes || envioEmCurso) {
+      enviar();
+      avisar('Salvando as alterações desta empresa. Tente trocar de novo em instantes.');
+      return;
+    }
+    if (!(await carregarDoServidor(id))) return;
+    zerarFiltros();
+    rolarParaHoje = true;
+    render();
+    window.scrollTo(0, 0);
+  }
+
+  function renderEmpresas() {
+    $('#lista-empresas').replaceChildren(...empresas.map((e) => {
+      const atual = e.id === empresaAtual;
+      const total = atual ? estado.tarefas.length : e.atividades;
+      return el('button', { type: 'button', 'aria-current': String(atual), onclick: () => trocarEmpresa(e.id) },
+        el('span', { class: 'empresa-nome' }, atual ? estado.titulo || e.nome : e.nome),
+        el('span', { class: 'empresa-total' }, `${total} ${total === 1 ? 'atividade' : 'atividades'}`));
+    }));
   }
 
   function entrarNoApp() {
@@ -199,6 +237,7 @@
     }
     if (VISOES.includes(prefs.visao)) estado.visao = prefs.visao;
     if (ZOOMS.includes(prefs.zoom)) estado.zoom = prefs.zoom;
+    if (typeof prefs.empresa === 'string') empresaPreferida = prefs.empresa;
   }
 
   function indicar(situacao) {
@@ -228,7 +267,7 @@
     const corpo = JSON.stringify({ revisaoBase: revisao, idGravacao, titulo: estado.titulo, tarefas: estado.tarefas });
     const manterViva = aoSair && new TextEncoder().encode(corpo).length < LIMITE_ENVIO_AO_SAIR;
     gravacoesSemResposta.add(idGravacao);
-    const r = await chamarApi('PUT', 'api/cronograma', corpo, { keepalive: manterViva });
+    const r = await chamarApi('PUT', `api/empresas/${empresaAtual}`, corpo, { keepalive: manterViva });
     envioEmCurso = false;
     if (r.status !== 0) gravacoesSemResposta.delete(idGravacao);
     const atual = r.status === 409 ? r.dados.atual : null;
@@ -261,6 +300,12 @@
       if (geracao !== geracaoSessao) enviar();
       else mostrarLogin();
       indicar('pendente');
+      return;
+    }
+    if (r.status === 404) {
+      for (const resolver of avisados) resolver(false);
+      avisar('Esta empresa foi excluída em outro aparelho.');
+      if (await carregarDoServidor()) render();
       return;
     }
     if (r.status === 400 || r.status === 413) {
@@ -296,14 +341,23 @@
     const ocupado = () => document.body.dataset.tela !== 'app' || alteracoesPendentes || envioEmCurso || dialogo.open;
     if (ocupado()) return;
     const revisaoAntes = revisao;
-    const r = await chamarApi('GET', 'api/cronograma');
+    const empresaAntes = empresaAtual;
+    const lista = await chamarApi('GET', 'api/empresas');
+    if (lista.status === 401) return mostrarLogin();
+    if (lista.status === 200) empresas = lista.dados.empresas;
+    if (!empresas.some((e) => e.id === empresaAtual)) {
+      if (!ocupado() && (await carregarDoServidor())) render();
+      return;
+    }
+    const r = await chamarApi('GET', `api/empresas/${empresaAtual}`);
     if (r.status === 401) return mostrarLogin();
-    if (r.status === 200 && r.dados.revisao > revisao && revisao === revisaoAntes && !ocupado()) aplicarDocumento(r.dados);
+    const semMudancaLocal = revisao === revisaoAntes && empresaAtual === empresaAntes;
+    if (r.status === 200 && r.dados.revisao > revisao && semMudancaLocal && !ocupado()) aplicarDocumento(r.dados);
     render();
   }
 
   function salvarPrefs() {
-    gravar(CHAVE_PREFS, JSON.stringify({ visao: estado.visao, zoom: estado.zoom }));
+    gravar(CHAVE_PREFS, JSON.stringify({ visao: estado.visao, zoom: estado.zoom, empresa: empresaAtual }));
   }
 
   function avisar(mensagem, acao) {
@@ -328,6 +382,7 @@
 
     document.title = `${estado.titulo.trim() || TITULO_PADRAO} · Cronograma`;
     if (document.activeElement !== $('#titulo')) $('#titulo').value = estado.titulo;
+    renderEmpresas();
     for (const b of document.querySelectorAll('[data-visao]')) b.setAttribute('aria-pressed', String(b.dataset.visao === estado.visao));
 
     $('#resumo').hidden = semTarefas;
@@ -667,7 +722,7 @@
       ['Publicação', 'Lançamento', 'Diego', 25, 25, 0],
       ['Divulgação', 'Lançamento', 'Ana', 26, 33, 0],
     ];
-    substituirTudo('Lançamento do site (exemplo)', itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
+    substituirTudo(estado.titulo, itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
       id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso, notas: '',
     }))).then((ok) => ok && avisar('Exemplo carregado. Edite ou apague à vontade.'));
   }
@@ -701,7 +756,7 @@
       return;
     }
     if (estado.tarefas.length && !confirm(`Substituir o cronograma atual (${estado.tarefas.length} atividades) pelo conteúdo de "${arquivo.name}"?`)) return;
-    substituirTudo(r.dados.titulo, r.dados.tarefas).then((ok) => ok && avisar(`${r.dados.tarefas.length} atividades importadas.`));
+    substituirTudo(estado.titulo, r.dados.tarefas).then((ok) => ok && avisar(`${r.dados.tarefas.length} atividades importadas.`));
   }
 
   const acoesMenu = {
@@ -713,7 +768,29 @@
     exemplo: carregarExemplo,
     'apagar-tudo': () => {
       if (!estado.tarefas.length || !confirm(`Apagar as ${estado.tarefas.length} atividades deste cronograma? Essa ação não pode ser desfeita.`)) return;
-      substituirTudo(TITULO_PADRAO, []).then((ok) => ok && avisar('Cronograma apagado.'));
+      substituirTudo(estado.titulo, []).then((ok) => ok && avisar('Atividades apagadas.'));
+    },
+    'excluir-empresa': async () => {
+      if (empresas.length <= 1) {
+        avisar('Esta é a única empresa. Crie outra antes de excluir esta.');
+        return;
+      }
+      if (!confirm(`Excluir a empresa "${estado.titulo}" e todo o cronograma dela? Essa ação não pode ser desfeita.`)) return;
+      if (alteracoesPendentes || envioEmCurso) {
+        avisar('Aguarde terminar de salvar antes de excluir.');
+        return;
+      }
+      const r = await chamarApi('DELETE', `api/empresas/${empresaAtual}`);
+      if (r.status !== 200 && r.status !== 404) {
+        avisar(r.dados?.erro || 'Não foi possível excluir a empresa.');
+        return;
+      }
+      empresaAtual = null;
+      if (!(await carregarDoServidor())) return;
+      zerarFiltros();
+      rolarParaHoje = true;
+      render();
+      avisar('Empresa excluída.');
     },
     sair: async () => {
       if (alteracoesPendentes || envioEmCurso) {
@@ -722,12 +799,18 @@
       }
       await chamarApi('POST', 'api/logout');
       aplicarDocumento({ revisao: 0, titulo: TITULO_PADRAO, tarefas: [] });
+      empresas = [];
+      empresaAtual = null;
       mostrarLogin();
     },
   };
 
+  $('#titulo').addEventListener('focus', () => {
+    nomeAntesDeEditar = estado.titulo;
+  });
   $('#titulo').addEventListener('input', (ev) => {
     estado.titulo = ev.target.value;
+    renderEmpresas();
     document.title = `${estado.titulo.trim() || TITULO_PADRAO} · Cronograma`;
     salvar();
   });
@@ -736,7 +819,7 @@
   });
   $('#titulo').addEventListener('blur', () => {
     if (estado.titulo.trim()) return;
-    estado.titulo = TITULO_PADRAO;
+    estado.titulo = nomeAntesDeEditar || TITULO_PADRAO;
     salvar();
     render();
   });
@@ -772,6 +855,36 @@
   }
   $('#btn-hoje').addEventListener('click', irParaHoje);
 
+  const menuEmpresas = $('#menu-empresas');
+  const dialogoEmpresa = $('#dialogo-empresa');
+  $('#btn-nova-empresa').addEventListener('click', () => {
+    menuEmpresas.open = false;
+    $('#f-empresa').value = '';
+    $('#e-empresa').textContent = '';
+    dialogoEmpresa.showModal();
+    $('#f-empresa').focus();
+  });
+  for (const b of document.querySelectorAll('[data-fechar-empresa]')) b.addEventListener('click', () => dialogoEmpresa.close());
+  $('#form-empresa').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const nome = $('#f-empresa').value.trim();
+    if (!nome) {
+      $('#e-empresa').textContent = 'Informe o nome da empresa.';
+      $('#f-empresa').focus();
+      return;
+    }
+    const r = await chamarApi('POST', 'api/empresas', { nome });
+    if (r.status === 401) return mostrarLogin();
+    if (r.status !== 201) {
+      $('#e-empresa').textContent = r.dados?.erro || 'Não foi possível criar a empresa. Confira a conexão.';
+      return;
+    }
+    dialogoEmpresa.close();
+    empresas = [...empresas, { id: r.dados.id, nome: r.dados.nome, atividades: 0 }];
+    await trocarEmpresa(r.dados.id);
+    if (empresaAtual === r.dados.id) avisar(`Empresa "${r.dados.nome}" criada.`);
+  });
+
   const menu = $('#menu');
   menu.addEventListener('click', (ev) => {
     const botao = ev.target.closest('[data-acao]');
@@ -781,9 +894,13 @@
   });
   document.addEventListener('click', (ev) => {
     if (menu.open && !menu.contains(ev.target)) menu.open = false;
+    if (menuEmpresas.open && !menuEmpresas.contains(ev.target)) menuEmpresas.open = false;
   });
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && menu.open) menu.open = false;
+    if (ev.key === 'Escape') {
+      menu.open = false;
+      menuEmpresas.open = false;
+    }
   });
   $('#arquivo').addEventListener('change', importarArquivo);
 

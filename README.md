@@ -17,6 +17,7 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 
 ## O que faz
 
+- **Empresas:** cada empresa tem seu próprio cronograma. O botão *Empresas*, ao lado do nome, lista as empresas para trocar e cria novas; o nome é editado no próprio título; *Arquivo → Excluir esta empresa* remove uma (sempre fica pelo menos uma). Cada aparelho lembra a última empresa aberta.
 - Atividades com nome, fase, responsável, início, término, progresso (%) e notas.
 - Status automático pela data de hoje: *Não iniciada*, *Em andamento*, *Atrasada* (passou do término sem 100%) e *Concluída*.
 - **Gantt** com escala por dia, semana ou mês, linha de hoje, cores por fase e barra de progresso. Clique na barra ou no nome para editar. Em períodos longos a escala engrossa sozinha (dia até ~3 anos, semana até ~20 anos).
@@ -28,7 +29,7 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 
 ## Onde ficam os dados
 
-No servidor, no arquivo `cronograma.json` dentro do volume `/data`. Cada alteração é enviada logo depois de feita; o indicador abaixo do título mostra *Salvando…*, *Salvo no servidor* ou *Sem conexão: alterações pendentes* (nesse caso o app tenta de novo sozinho e reenvia quando a conexão volta).
+No servidor, no arquivo `empresas.json` dentro do volume `/data` (um cronograma por empresa, cada um com sua revisão). Quem vinha da versão de cronograma único tem o `cronograma.json` convertido sozinho na primeira empresa; o arquivo antigo fica guardado como `cronograma.json.migrado`. Cada alteração é enviada logo depois de feita; o indicador abaixo do título mostra *Salvando…*, *Salvo no servidor* ou *Sem conexão: alterações pendentes* (nesse caso o app tenta de novo sozinho e reenvia quando a conexão volta).
 
 - **Vários aparelhos:** ao voltar para a aba, o app busca a versão mais recente. Se dois aparelhos editarem ao mesmo tempo sem atualizar, o segundo a gravar recebe a versão do primeiro e um aviso para refazer a última alteração, em vez de apagar o que o outro fez.
 - **Senha:** uma só, definida em `SENHA`. Quem tem a senha vê e edita o mesmo cronograma. Após 5 tentativas erradas, o endereço que errou espera 15 minutos.

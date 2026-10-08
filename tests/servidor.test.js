@@ -27,8 +27,14 @@ async function entrar(base, { senha = SENHA, cabecalhos = {} } = {}) {
   return { status: r.status, setCookie, cookie: setCookie.split(';')[0] };
 }
 
-function api(base, cookie, metodo = 'GET', corpo) {
-  return fetch(`${base}/api/cronograma`, {
+async function primeiraEmpresa(base, cookie) {
+  const r = await fetch(`${base}/api/empresas`, { headers: { Cookie: cookie } });
+  return r.status === 200 ? (await r.json()).empresas[0].id : 'inexistente';
+}
+
+async function api(base, cookie, metodo = 'GET', corpo, id) {
+  const empresa = id || (await primeiraEmpresa(base, cookie));
+  return fetch(`${base}/api/empresas/${empresa}`, {
     method: metodo,
     headers: { Cookie: cookie, ...(corpo ? { 'Content-Type': 'application/json' } : {}) },
     body: corpo && JSON.stringify(corpo),
@@ -65,7 +71,7 @@ test('cronograma novo começa vazio na revisão 0', async (t) => {
   const { cookie } = await entrar(base);
   const r = await api(base, cookie);
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { revisao: 0, idGravacao: null, titulo: 'Meu cronograma', tarefas: [] });
+  assert.deepEqual(await r.json(), { revisao: 0, idGravacao: null, titulo: 'Minha empresa', tarefas: [] });
 });
 
 test('PUT grava, incrementa a revisão e persiste entre reinícios do servidor', async (t) => {
@@ -109,7 +115,7 @@ test('PUT com tarefa inválida devolve 400 e não grava', async (t) => {
 test('API só aceita JSON e recusa corpo grande demais', async (t) => {
   const { base } = await subir(t);
   const { cookie } = await entrar(base);
-  const texto = await fetch(`${base}/api/cronograma`, { method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'text/plain' }, body: '{}' });
+  const texto = await fetch(`${base}/api/empresas/${await primeiraEmpresa(base, cookie)}`, { method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'text/plain' }, body: '{}' });
   assert.equal(texto.status, 415);
   const enorme = await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'x'.repeat(3 * 1024 * 1024), tarefas: [] });
   assert.equal(enorme.status, 413);
@@ -244,4 +250,78 @@ test('dois processos no mesmo volume enxergam as gravações um do outro', async
   assert.equal(vistoPorB.revisao, 1);
   assert.equal(vistoPorB.titulo, 'Pelo A');
   assert.equal((await api(b.base, sessaoB.cookie, 'PUT', { revisaoBase: 0, titulo: 'Pelo B', tarefas: [] })).status, 409);
+});
+
+function criarEmpresa(base, cookie, nome) {
+  return fetch(`${base}/api/empresas`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ nome }) });
+}
+
+async function listar(base, cookie) {
+  return (await (await fetch(`${base}/api/empresas`, { headers: { Cookie: cookie } })).json()).empresas;
+}
+
+test('cronograma da versão anterior vira a primeira empresa, sem perder nada', async (t) => {
+  const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'cronograma-'));
+  fs.writeFileSync(path.join(pasta, 'cronograma.json'), JSON.stringify({ revisao: 3, idGravacao: null, titulo: 'Obra antiga', tarefas: [{ id: 'a1', ...TAREFA }] }));
+  const { base } = await subir(t, { pasta });
+  const { cookie } = await entrar(base);
+  const empresas = await listar(base, cookie);
+  assert.deepEqual(empresas.map((e) => [e.nome, e.atividades]), [['Obra antiga', 1]]);
+  const doc = await (await api(base, cookie)).json();
+  assert.equal(doc.revisao, 3);
+  assert.equal(doc.tarefas[0].id, 'a1');
+  assert.ok(fs.existsSync(path.join(pasta, 'cronograma.json.migrado')), 'arquivo antigo guardado');
+  assert.ok(!fs.existsSync(path.join(pasta, 'cronograma.json')));
+});
+
+test('cada empresa tem seu próprio cronograma e sua própria revisão', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  const criada = await criarEmpresa(base, cookie, '  Construtora Alfa ');
+  assert.equal(criada.status, 201);
+  const { id, nome } = await criada.json();
+  assert.equal(nome, 'Construtora Alfa');
+  const [primeira] = await listar(base, cookie);
+  assert.equal((await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'Construtora Alfa', tarefas: [TAREFA] }, id)).status, 200);
+  assert.equal((await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: primeira.nome, tarefas: [] }, primeira.id)).status, 200, 'revisão da outra empresa não mudou');
+  assert.equal((await (await api(base, cookie, 'GET', undefined, id)).json()).tarefas.length, 1);
+  assert.equal((await (await api(base, cookie, 'GET', undefined, primeira.id)).json()).tarefas.length, 0);
+  assert.deepEqual((await listar(base, cookie)).map((e) => [e.nome, e.atividades]), [['Minha empresa', 0], ['Construtora Alfa', 1]]);
+});
+
+test('renomear o cronograma renomeia a empresa na lista', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'Padaria Sol', tarefas: [] });
+  assert.equal((await listar(base, cookie))[0].nome, 'Padaria Sol');
+});
+
+test('empresa pode ser excluída, menos a última', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  const { id } = await (await criarEmpresa(base, cookie, 'Temporária')).json();
+  const apagar = (alvo) => fetch(`${base}/api/empresas/${alvo}`, { method: 'DELETE', headers: { Cookie: cookie } });
+  assert.equal((await apagar(id)).status, 200);
+  assert.equal((await api(base, cookie, 'GET', undefined, id)).status, 404);
+  assert.equal((await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'x', tarefas: [] }, id)).status, 404);
+  const [ultima] = await listar(base, cookie);
+  assert.equal((await apagar(ultima.id)).status, 409);
+  assert.equal((await listar(base, cookie)).length, 1);
+});
+
+test('nome de empresa é obrigatório e limitado', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  assert.equal((await criarEmpresa(base, cookie, '   ')).status, 400);
+  assert.equal((await criarEmpresa(base, cookie, 'x'.repeat(81))).status, 400);
+  assert.equal((await fetch(`${base}/api/empresas`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
+});
+
+test('arquivo de empresas ilegível é guardado à parte', async (t) => {
+  const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'cronograma-'));
+  fs.writeFileSync(path.join(pasta, 'empresas.json'), '{"empresas": 7}');
+  const { base } = await subir(t, { pasta });
+  const { cookie } = await entrar(base);
+  assert.equal((await listar(base, cookie)).length, 1);
+  assert.ok(fs.readdirSync(pasta).some((n) => n.startsWith('empresas.json.ilegivel-')));
 });
