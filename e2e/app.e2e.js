@@ -1,35 +1,74 @@
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { criarServidor } = require('../servidor.js');
 
-const URL_APP = pathToFileURL(path.join(__dirname, '..', 'index.html')).href;
+const SENHA = 'senha-do-teste-e2e';
 const OUT = path.join(__dirname, 'saida');
 fs.mkdirSync(OUT, { recursive: true });
 
 (async () => {
   const browser = await chromium.launch();
+  const servidores = [];
   const erros = [];
+  const novoServidor = async () => {
+    const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'cronograma-e2e-'));
+    const servidor = criarServidor({ senha: SENHA, pastaDados: pasta });
+    await new Promise((pronto) => servidor.listen(0, '127.0.0.1', pronto));
+    servidores.push(servidor);
+    return `http://127.0.0.1:${servidor.address().port}/`;
+  };
   const nova = async (opts) => {
     const ctx = await browser.newContext({ acceptDownloads: true, locale: 'pt-BR', ...opts });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => erros.push('pageerror: ' + e.message));
-    page.on('console', (m) => { if (m.type() === 'error') erros.push('console: ' + m.text()); });
+    page.on('console', (m) => {
+      if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) erros.push('console: ' + m.text());
+    });
     page.on('dialog', (d) => d.accept());
     return { ctx, page };
   };
-
-  // ---------- Desktop ----------
-  const { ctx, page } = await nova({ viewport: { width: 1366, height: 860 } });
-  await page.goto(URL_APP);
-  assert.ok(await page.isVisible('text=Seu cronograma está vazio'), 'estado vazio');
+  const entrar = async (pg, url) => {
+    await pg.goto(url);
+    await pg.waitForSelector('body[data-tela="login"]');
+    await pg.fill('#senha', SENHA);
+    await pg.click('#form-login button[type=submit]');
+    await pg.waitForSelector('body[data-tela="app"]');
+  };
+  const aguardarSalvo = (pg) => pg.waitForFunction(() => document.querySelector('#salvo').textContent === 'Salvo no servidor');
+  const aguardarAnuncio = (pg, texto) => pg.waitForFunction((t) => document.querySelector('#anuncio').textContent.includes(t), texto);
+  const salvarTarefa = async (pg, nome, inicio, fim) => {
+    await pg.click('#btn-nova');
+    await pg.fill('#f-nome', nome);
+    if (inicio) await pg.fill('#f-inicio', inicio);
+    if (fim) await pg.fill('#f-fim', fim);
+    await pg.click('#form-tarefa button[type=submit]');
+  };
   const logo = async (pg, onde) => {
     assert.equal(await pg.textContent('.marca-nome'), 'GoldSystem', `${onde}: nome da logo`);
     assert.ok(await pg.isVisible('.marca'), `${onde}: logo visível`);
     assert.ok(await pg.evaluate(() => document.querySelector('.marca-icone').naturalWidth > 0), `${onde}: ícone da logo carregou`);
     assert.equal(await pg.getAttribute('link[rel=icon]', 'href'), 'img/logo-goldsystem.svg', `${onde}: favicon`);
   };
+
+  // ---------- Login ----------
+  const URL_A = await novoServidor();
+  const { ctx, page } = await nova({ viewport: { width: 1366, height: 860 } });
+  await page.goto(URL_A);
+  await page.waitForSelector('body[data-tela="login"]');
+  await logo(page, 'login');
+  await page.screenshot({ path: path.join(OUT, '00-login.png') });
+  await page.fill('#senha', 'senha-errada');
+  await page.click('#form-login button[type=submit]');
+  await page.waitForSelector('#erro-login:has-text("Senha incorreta.")');
+  await page.fill('#senha', SENHA);
+  await page.click('#form-login button[type=submit]');
+  await page.waitForSelector('body[data-tela="app"]');
+
+  // ---------- Desktop ----------
+  assert.ok(await page.isVisible('text=Seu cronograma está vazio'), 'estado vazio');
   await logo(page, 'desktop');
   await page.screenshot({ path: path.join(OUT, '01-vazio-desktop.png') });
 
@@ -111,6 +150,7 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.equal(await page.locator('.tabela tbody tr').count(), 10);
   await page.click('#toast button:has-text("Desfazer")');
   assert.equal(await page.locator('.tabela tbody tr').count(), 11);
+  await aguardarSalvo(page);
   await page.click('[aria-label="Duplicar Wireframes"]');
   assert.ok(await page.isVisible('text=Wireframes (cópia)'));
 
@@ -119,11 +159,17 @@ fs.mkdirSync(OUT, { recursive: true });
   await page.press('#titulo', 'Enter');
   assert.equal(await page.title(), 'Obra da casa · Cronograma');
 
-  // persistência
+  // persistência no servidor: recarregar e abrir em outro aparelho
+  await aguardarSalvo(page);
   await page.reload();
+  await page.waitForSelector('body[data-tela="app"]');
   assert.equal(await page.inputValue('#titulo'), 'Obra da casa');
   assert.equal(await page.locator('.tabela tbody tr').count(), 12, 'persistiu após reload');
   assert.equal(await page.getAttribute('[data-visao=tabela]', 'aria-pressed'), 'true', 'preferência de visão persistiu');
+  const celular = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  await entrar(celular.page, URL_A);
+  assert.equal(await celular.page.inputValue('#titulo'), 'Obra da casa', 'outro aparelho vê o mesmo título');
+  assert.equal(await celular.page.locator('.g-barra').count(), 12, 'outro aparelho vê as mesmas atividades');
 
   // exportar CSV
   await page.click('#menu summary');
@@ -139,6 +185,7 @@ fs.mkdirSync(OUT, { recursive: true });
   await page.click('#menu summary');
   await page.click('[data-acao=apagar-tudo]');
   assert.ok(await page.isVisible('text=Seu cronograma está vazio'));
+  await aguardarSalvo(page);
   await page.setInputFiles('#arquivo', jsonPath);
   await page.waitForSelector('.tabela tbody tr');
   assert.equal(await page.locator('.tabela tbody tr').count(), 12, 'reimportou');
@@ -159,7 +206,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
   // ---------- Sistema em modo escuro: a página continua clara ----------
   const escuro = await nova({ viewport: { width: 1366, height: 860 }, colorScheme: 'dark' });
-  await escuro.page.goto(URL_APP);
+  await entrar(escuro.page, await novoServidor());
   await escuro.page.click('text=Ver um exemplo');
   assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(245, 245, 243)');
   assert.equal(await escuro.page.evaluate(() => getComputedStyle(document.querySelector('.topo')).backgroundColor), 'rgba(255, 255, 255, 0.82)');
@@ -168,7 +215,7 @@ fs.mkdirSync(OUT, { recursive: true });
   // ---------- Mobile ----------
   for (const [nome, vp] of [['mobile-360', { width: 360, height: 740 }], ['mobile-390', { width: 390, height: 844 }], ['tablet-768', { width: 768, height: 1024 }]]) {
     const m = await nova({ viewport: vp, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
-    await m.page.goto(URL_APP);
+    await entrar(m.page, await novoServidor());
     const semOverflow = async (etapa) => {
       const r = await m.page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
       assert.ok(r.sw <= r.iw, `${nome}/${etapa}: rolagem horizontal na página (${r.sw} > ${r.iw})`);
@@ -203,19 +250,12 @@ fs.mkdirSync(OUT, { recursive: true });
   }
 
   // ---------- Correções da revisão ----------
-  const salvarTarefa = async (pg, nome, inicio, fim) => {
-    await pg.click('#btn-nova');
-    await pg.fill('#f-nome', nome);
-    if (inicio) await pg.fill('#f-inicio', inicio);
-    if (fim) await pg.fill('#f-fim', fim);
-    await pg.click('#form-tarefa button[type=submit]');
-  };
 
   // foco volta para a atividade salva; anúncio para leitor de tela
   await page.click('[data-visao=gantt]');
   await salvarTarefa(page, 'Foco depois de salvar');
   assert.equal(await page.evaluate(() => document.activeElement.textContent.includes('Foco depois de salvar')), true, 'foco na atividade salva');
-  assert.equal(await page.textContent('#anuncio'), 'Atividade salva.');
+  await aguardarAnuncio(page, 'Atividade salva.');
 
   // progresso com texto inválido no campo numérico não vira 0% em silêncio
   await page.click('#btn-nova');
@@ -268,42 +308,94 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.equal(await page.getAttribute('[data-zoom=mes]', 'aria-pressed'), 'true');
   assert.equal(await page.isDisabled('[data-zoom=semana]'), true);
 
-  // outra aba mudou os dados: ao voltar para a aba, recarrega em vez de sobrescrever
-  await page.evaluate(() => {
-    localStorage.setItem('cronograma:v1', JSON.stringify({ titulo: 'Editado na outra aba', tarefas: [{ id: 'z', nome: 'Da outra aba', inicio: '2026-10-01', fim: '2026-10-02', progresso: 0 }] }));
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
-  assert.equal(await page.inputValue('#titulo'), 'Editado na outra aba');
-  assert.deepEqual(await page.locator('.g-nome-texto').allTextContents(), ['Da outra aba']);
+  // outro aparelho mudou os dados: ao voltar para a aba, recarrega em vez de sobrescrever
+  await aguardarSalvo(page);
+  await celular.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await celular.page.waitForSelector('.g-nome-texto:has-text("Trinta anos")');
+  await salvarTarefa(celular.page, 'Feita no celular');
+  await aguardarSalvo(celular.page);
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForSelector('.g-nome-texto:has-text("Feita no celular")');
 
-  // armazenamento cheio: nada de "Atividade salva" falso, indicador fica visível no celular
-  const cheio = await nova({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
-  await cheio.page.goto(URL_APP);
-  await cheio.page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException('cheio', 'QuotaExceededError'); }; });
-  await salvarTarefa(cheio.page, 'Não cabe');
-  assert.match(await cheio.page.textContent('#toast'), /não permitiu salvar/);
-  assert.equal(await cheio.page.isVisible('#salvo'), true, 'indicador de falha visível em 360px');
-  assert.match(await cheio.page.textContent('#salvo'), /Não foi salvo/);
+  // conflito: os dois aparelhos editam sem atualizar; o segundo a gravar recebe a versão do primeiro
+  await celular.page.fill('#titulo', 'Título do celular');
+  await aguardarSalvo(celular.page);
+  await salvarTarefa(page, 'Feita no computador sem atualizar');
+  await aguardarAnuncio(page, 'alterado em outro aparelho');
+  assert.equal(await page.inputValue('#titulo'), 'Título do celular');
+  assert.equal(await page.locator('.g-nome-texto:has-text("Feita no computador sem atualizar")').count(), 0);
+  assert.equal(await page.locator('.g-nome-texto:has-text("Feita no celular")').count(), 1);
 
-  // dado salvo ilegível: guarda cópia e oferece download antes de qualquer gravação
-  const ilegivel = await nova({ viewport: { width: 1366, height: 860 } });
-  await ilegivel.page.goto(URL_APP);
-  await ilegivel.page.evaluate(() => localStorage.setItem('cronograma:v1', '{conteudo quebrado'));
-  await ilegivel.page.reload();
-  assert.match(await ilegivel.page.textContent('#toast'), /ilegível/);
-  assert.equal(await ilegivel.page.isVisible('#toast button:has-text("Baixar cópia")'), true);
-  await salvarTarefa(ilegivel.page, 'Depois do problema');
-  assert.equal(await ilegivel.page.evaluate(() => localStorage.getItem('cronograma:v1:ilegivel')), '{conteudo quebrado');
+  // sem rede: nada de "Atividade salva" falso; envia quando a conexão volta
+  const rede = await nova({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
+  await entrar(rede.page, await novoServidor());
+  await rede.page.route('**/api/cronograma', (r) => (r.request().method() === 'PUT' ? r.abort() : r.continue()));
+  await salvarTarefa(rede.page, 'Sem rede');
+  await rede.page.waitForFunction(() => document.querySelector('#salvo').textContent.startsWith('Sem conexão'));
+  assert.match(await rede.page.textContent('#anuncio'), /Sem conexão com o servidor/);
+  assert.equal(await rede.page.isVisible('#salvo'), true, 'indicador de falha visível em 360px');
+  await rede.page.unroute('**/api/cronograma');
+  await rede.page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await aguardarSalvo(rede.page);
+  await rede.page.reload();
+  await rede.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await rede.page.locator('.g-nome-texto:has-text("Sem rede")').count(), 1, 'gravou ao voltar a conexão');
+
+  // sessão expirada: pede a senha e envia o que estava pendente
+  await rede.ctx.clearCookies();
+  await salvarTarefa(rede.page, 'Depois de expirar');
+  await rede.page.waitForSelector('body[data-tela="login"]');
+  await rede.page.fill('#senha', SENHA);
+  await rede.page.click('#form-login button[type=submit]');
+  await rede.page.waitForSelector('body[data-tela="app"]');
+  await aguardarSalvo(rede.page);
+  await rede.page.reload();
+  await rede.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await rede.page.locator('.g-nome-texto:has-text("Depois de expirar")').count(), 1, 'pendente enviado após novo login');
+
+  // dados que estavam só no navegador sobem para o servidor no primeiro acesso
+  const URL_MIGRACAO = await novoServidor();
+  const antigo = await nova({ viewport: { width: 1366, height: 860 } });
+  await antigo.page.goto(URL_MIGRACAO);
+  await antigo.page.evaluate(() => localStorage.setItem('cronograma:v1', JSON.stringify({
+    titulo: 'Do navegador antigo',
+    tarefas: [{ id: 'a', nome: 'Antiga', inicio: '2026-10-01', fim: '2026-10-03', progresso: 50 }],
+  })));
+  await antigo.page.fill('#senha', SENHA);
+  await antigo.page.click('#form-login button[type=submit]');
+  await aguardarAnuncio(antigo.page, 'Atividades enviadas para o servidor.');
+  assert.equal(await antigo.page.evaluate(() => localStorage.getItem('cronograma:v1')), null, 'cópia local removida após enviar');
+  const novoAparelho = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await entrar(novoAparelho.page, URL_MIGRACAO);
+  assert.equal(await novoAparelho.page.inputValue('#titulo'), 'Do navegador antigo');
+
+  // endereço servindo só os arquivos (Build Pack errado) explica o que fazer
+  const semApi = await nova({ viewport: { width: 1366, height: 860 } });
+  await semApi.page.route('**/api/cronograma', (r) => r.fulfill({ status: 404, contentType: 'text/html', body: '<h1>404</h1>' }));
+  await semApi.page.goto(URL_A);
+  await semApi.page.waitForSelector('text=Servidor do cronograma não encontrado');
+  assert.equal(await semApi.page.isVisible('#btn-nova'), false);
+
+  // sair volta para a tela de senha
+  await page.click('#menu summary');
+  await page.click('[data-acao=sair]');
+  await page.waitForSelector('body[data-tela="login"]');
+  await page.reload();
+  await page.waitForSelector('body[data-tela="login"]');
 
   // celular: botão flutuante tem nome acessível; diálogo sem rolagem dupla em tela baixa
   const baixo = await nova({ viewport: { width: 360, height: 560 }, isMobile: true, hasTouch: true });
-  await baixo.page.goto(URL_APP);
+  await entrar(baixo.page, await novoServidor());
   assert.equal(await baixo.page.getByRole('button', { name: 'Nova atividade', exact: true }).isVisible(), true);
   await baixo.page.click('#btn-nova');
   const rolagemDupla = await baixo.page.evaluate(() => { const d = document.querySelector('#dialogo'); return d.scrollHeight - d.clientHeight; });
   assert.equal(rolagemDupla, 0, 'diálogo não rola por fora do formulário');
 
   await browser.close();
+  for (const servidor of servidores) {
+    servidor.closeAllConnections();
+    servidor.close();
+  }
   assert.deepEqual(erros, [], 'sem erros no console');
   console.log('E2E OK');
 })().catch((e) => { console.error('E2E FALHOU:', e.message); process.exit(1); });

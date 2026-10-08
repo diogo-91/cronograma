@@ -2,9 +2,16 @@
   'use strict';
 
   const C = Cronograma;
-  const CHAVE_DADOS = 'cronograma:v1';
+  const CHAVE_DADOS_DO_NAVEGADOR = 'cronograma:v1';
   const CHAVE_PREFS = 'cronograma:prefs';
-  const CHAVE_RECUPERACAO = 'cronograma:v1:ilegivel';
+  const ESPERA_PARA_GRAVAR_MS = 400;
+  const ESPERA_NOVA_TENTATIVA_MS = 10000;
+  const LIMITE_ENVIO_AO_SAIR = 60000;
+  const TEXTO_INDICADOR = {
+    salvo: 'Salvo no servidor',
+    salvando: 'Salvando…',
+    pendente: 'Sem conexão: alterações pendentes',
+  };
   const TITULO_PADRAO = 'Meu cronograma';
   const VISOES = ['gantt', 'tabela'];
   const ZOOMS = ['dia', 'semana', 'mes'];
@@ -49,7 +56,11 @@
   let hojeNoGantt = null;
   let duracaoEditada = 7;
   let temporizadorAviso = null;
-  let ultimoBruto = null;
+  let revisao = 0;
+  let alteracoesPendentes = false;
+  let envioEmCurso = false;
+  let aguardandoEnvio = [];
+  let temporizadorGravar = null;
 
   function el(tag, props = {}, ...filhos) {
     const e = document.createElement(tag);
@@ -88,30 +99,95 @@
   function gravar(chave, valor) {
     try {
       localStorage.setItem(chave, valor);
-      return true;
+    } catch {}
+  }
+
+  function remover(chave) {
+    try {
+      localStorage.removeItem(chave);
+    } catch {}
+  }
+
+  async function chamarApi(metodo, url, corpo, extras = {}) {
+    try {
+      const resposta = await fetch(url, {
+        method: metodo,
+        headers: corpo === undefined ? {} : { 'Content-Type': 'application/json' },
+        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+        ...extras,
+      });
+      const dados = await resposta.json().catch(() => null);
+      return { status: resposta.status, dados };
     } catch {
-      return false;
+      return { status: 0, dados: null };
     }
   }
 
-  function carregar() {
-    estado.titulo = TITULO_PADRAO;
-    estado.tarefas = [];
-    const bruto = ler(CHAVE_DADOS);
-    ultimoBruto = bruto;
-    if (bruto) {
-      const r = C.importarDados(bruto);
-      if (r.ok) {
-        estado.titulo = r.dados.titulo;
-        estado.tarefas = r.dados.tarefas;
-      } else {
-        gravar(CHAVE_RECUPERACAO, bruto);
-        avisar('O cronograma salvo neste navegador está ilegível. Uma cópia foi guardada à parte.', {
-          rotulo: 'Baixar cópia',
-          executar: () => baixar('cronograma-ilegivel.json', bruto, 'application/json'),
-        });
-      }
+  function mostrarTela(tela) {
+    document.body.dataset.tela = tela;
+  }
+
+  function aplicarDocumento(doc) {
+    revisao = doc.revisao;
+    estado.titulo = doc.titulo;
+    estado.tarefas = doc.tarefas;
+  }
+
+  async function carregarDoServidor() {
+    const r = await chamarApi('GET', 'api/cronograma');
+    if (r.status === 200) {
+      aplicarDocumento(r.dados);
+      return true;
     }
+    if (r.status === 401) mostrarLogin();
+    else mostrarFalhaConexao(r.status);
+    return false;
+  }
+
+  function entrarNoApp() {
+    mostrarTela('app');
+    indicar(alteracoesPendentes ? 'salvando' : 'salvo');
+    rolarParaHoje = true;
+    render();
+    oferecerDadosDoNavegador();
+  }
+
+  function mostrarLogin() {
+    if (dialogo.open) dialogo.close();
+    mostrarTela('login');
+    $('#senha').value = '';
+    $('#erro-login').textContent = '';
+    $('#senha').focus();
+  }
+
+  function mostrarFalhaConexao(status) {
+    mostrarTela('falha');
+    for (const seletor of ['#resumo', '.ferramentas', '#vista-gantt', '#vista-tabela']) $(seletor).hidden = true;
+    const semServidor = status === 404;
+    $('#vazio').hidden = false;
+    $('#vazio').replaceChildren(
+      el('h2', {}, semServidor ? 'Servidor do cronograma não encontrado' : 'Sem conexão com o servidor'),
+      el('p', {}, semServidor
+        ? 'Este endereço está entregando só os arquivos do site. No Coolify, publique com o Build Pack "Dockerfile" (passo a passo no README).'
+        : 'Não foi possível carregar o cronograma. Confira sua conexão e tente de novo.'),
+      el('div', { class: 'botoes' }, el('button', { type: 'button', class: 'btn primario', onclick: () => location.reload() }, 'Tentar de novo')),
+    );
+  }
+
+  function oferecerDadosDoNavegador() {
+    if (estado.tarefas.length) return;
+    const bruto = ler(CHAVE_DADOS_DO_NAVEGADOR);
+    const r = bruto ? C.importarDados(bruto) : { ok: false };
+    if (!r.ok || !r.dados.tarefas.length) return;
+    if (!confirm(`Encontramos ${r.dados.tarefas.length} atividades salvas só neste navegador. Enviar para o servidor para usar em qualquer aparelho?`)) return;
+    substituirTudo(r.dados.titulo, r.dados.tarefas).then((ok) => {
+      if (!ok) return;
+      remover(CHAVE_DADOS_DO_NAVEGADOR);
+      avisar('Atividades enviadas para o servidor.');
+    });
+  }
+
+  function carregarPrefs() {
     let prefs = {};
     try {
       prefs = JSON.parse(ler(CHAVE_PREFS)) || {};
@@ -122,19 +198,66 @@
     if (ZOOMS.includes(prefs.zoom)) estado.zoom = prefs.zoom;
   }
 
-  function salvar() {
-    const bruto = JSON.stringify({ versao: 1, titulo: estado.titulo, tarefas: estado.tarefas });
-    const ok = gravar(CHAVE_DADOS, bruto);
-    if (ok) ultimoBruto = bruto;
+  function indicar(situacao) {
     const indicador = $('#salvo');
-    indicador.textContent = ok ? 'Salvo neste navegador' : 'Não foi salvo: exporte um backup';
-    indicador.classList.toggle('falhou', !ok);
-    if (!ok) avisar('O navegador não permitiu salvar. Use Arquivo → Exportar backup para não perder os dados.');
-    return ok;
+    indicador.textContent = TEXTO_INDICADOR[situacao];
+    indicador.classList.toggle('falhou', situacao === 'pendente');
+    indicador.classList.toggle('salvando', situacao === 'salvando');
   }
 
-  function sincronizar() {
-    if (ler(CHAVE_DADOS) !== ultimoBruto) carregar();
+  function salvar() {
+    alteracoesPendentes = true;
+    indicar('salvando');
+    clearTimeout(temporizadorGravar);
+    temporizadorGravar = setTimeout(enviar, ESPERA_PARA_GRAVAR_MS);
+    return new Promise((resolver) => aguardandoEnvio.push(resolver));
+  }
+
+  async function enviar({ aoSair = false } = {}) {
+    clearTimeout(temporizadorGravar);
+    if (envioEmCurso || !alteracoesPendentes) return;
+    envioEmCurso = true;
+    alteracoesPendentes = false;
+    const avisados = aguardandoEnvio;
+    aguardandoEnvio = [];
+    const corpo = { revisaoBase: revisao, titulo: estado.titulo, tarefas: estado.tarefas };
+    const manterViva = aoSair && JSON.stringify(corpo).length < LIMITE_ENVIO_AO_SAIR;
+    const r = await chamarApi('PUT', 'api/cronograma', corpo, { keepalive: manterViva });
+    envioEmCurso = false;
+    const ok = r.status === 200;
+    if (ok) {
+      revisao = r.dados.revisao;
+    } else if (r.status === 409) {
+      receberConflito(r.dados.atual);
+    } else if (r.status === 401) {
+      alteracoesPendentes = true;
+      mostrarLogin();
+    } else if (r.status === 400 || r.status === 413) {
+      avisar(`O servidor recusou a gravação. ${r.dados?.erro || ''}`);
+    } else {
+      alteracoesPendentes = true;
+      temporizadorGravar = setTimeout(enviar, ESPERA_NOVA_TENTATIVA_MS);
+      avisar('Sem conexão com o servidor. As alterações serão enviadas assim que a conexão voltar.');
+    }
+    for (const resolver of avisados) resolver(ok);
+    if (ok && alteracoesPendentes) enviar();
+    indicar(!alteracoesPendentes ? 'salvo' : ok ? 'salvando' : 'pendente');
+  }
+
+  function receberConflito(atual) {
+    clearTimeout(temporizadorGravar);
+    alteracoesPendentes = false;
+    aplicarDocumento(atual);
+    render();
+    avisar('Este cronograma foi alterado em outro aparelho. Carreguei a versão mais recente: confira e refaça sua última alteração.');
+  }
+
+  async function sincronizar() {
+    const ocupado = () => document.body.dataset.tela !== 'app' || alteracoesPendentes || envioEmCurso || dialogo.open;
+    if (ocupado()) return;
+    const r = await chamarApi('GET', 'api/cronograma');
+    if (r.status === 401) return mostrarLogin();
+    if (r.status === 200 && r.dados.revisao !== revisao && !ocupado()) aplicarDocumento(r.dados);
     render();
   }
 
@@ -220,7 +343,7 @@
       ? [
           icone('ilustracao'),
           el('h2', {}, 'Seu cronograma está vazio'),
-          el('p', {}, 'Cadastre as atividades com datas de início e término e acompanhe tudo no gráfico de Gantt ou em lista. Os dados ficam salvos neste navegador.'),
+          el('p', {}, 'Cadastre as atividades com datas de início e término e acompanhe tudo no gráfico de Gantt ou em lista. Os dados ficam salvos no servidor e aparecem em qualquer aparelho.'),
           el('div', { class: 'botoes' },
             el('button', { type: 'button', class: 'btn primario', onclick: () => abrirEditor(null) }, 'Criar primeira atividade'),
             el('button', { type: 'button', class: 'btn', onclick: carregarExemplo }, 'Ver um exemplo')),
@@ -416,12 +539,13 @@
     if (indice >= 0) estado.tarefas[indice] = tarefa;
     else estado.tarefas.push(tarefa);
     dialogo.close();
-    const salvou = salvar();
+    const gravacao = salvar();
     render();
     focarTarefa(tarefa.id);
-    if (!salvou) return;
     const oculta = C.filtrarTarefas([tarefa], estado.filtros, C.hojeISO()).length === 0;
-    avisar(oculta ? 'Atividade salva, mas oculta pelos filtros atuais.' : 'Atividade salva.', oculta && { rotulo: 'Limpar filtros', executar: limparFiltros });
+    gravacao.then((ok) => {
+      if (ok) avisar(oculta ? 'Atividade salva, mas oculta pelos filtros atuais.' : 'Atividade salva.', oculta && { rotulo: 'Limpar filtros', executar: limparFiltros });
+    });
   }
 
   function focarTarefa(id) {
@@ -438,18 +562,20 @@
       return;
     }
     const [removida] = estado.tarefas.splice(indice, 1);
-    const salvou = salvar();
+    const gravacao = salvar();
     render();
     focarTarefa(null);
-    if (!salvou) return;
-    avisar(`"${removida.nome}" excluída.`, {
-      rotulo: 'Desfazer',
-      executar: () => {
-        estado.tarefas.push(removida);
-        salvar();
-        render();
-        focarTarefa(removida.id);
-      },
+    gravacao.then((ok) => {
+      if (!ok) return;
+      avisar(`"${removida.nome}" excluída.`, {
+        rotulo: 'Desfazer',
+        executar: () => {
+          estado.tarefas.push(removida);
+          salvar();
+          render();
+          focarTarefa(removida.id);
+        },
+      });
     });
   }
 
@@ -458,10 +584,10 @@
     if (!original) return;
     const copia = { ...original, id: C.novoId(), nome: `${original.nome} (cópia)`, progresso: 0 };
     estado.tarefas.push(copia);
-    const salvou = salvar();
+    const gravacao = salvar();
     render();
     focarTarefa(copia.id);
-    if (salvou) avisar('Atividade duplicada.');
+    gravacao.then((ok) => ok && avisar('Atividade duplicada.'));
   }
 
   function zerarFiltros() {
@@ -480,9 +606,9 @@
     estado.tarefas = tarefas;
     zerarFiltros();
     rolarParaHoje = true;
-    const salvou = salvar();
+    const gravacao = salvar();
     render();
-    return salvou;
+    return gravacao;
   }
 
   function carregarExemplo() {
@@ -500,10 +626,9 @@
       ['Publicação', 'Lançamento', 'Diego', 25, 25, 0],
       ['Divulgação', 'Lançamento', 'Ana', 26, 33, 0],
     ];
-    const salvou = substituirTudo('Lançamento do site (exemplo)', itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
+    substituirTudo('Lançamento do site (exemplo)', itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
       id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso, notas: '',
-    })));
-    if (salvou) avisar('Exemplo carregado. Edite ou apague à vontade.');
+    }))).then((ok) => ok && avisar('Exemplo carregado. Edite ou apague à vontade.'));
   }
 
   function nomeArquivo() {
@@ -535,7 +660,7 @@
       return;
     }
     if (estado.tarefas.length && !confirm(`Substituir o cronograma atual (${estado.tarefas.length} atividades) pelo conteúdo de "${arquivo.name}"?`)) return;
-    if (substituirTudo(r.dados.titulo, r.dados.tarefas)) avisar(`${r.dados.tarefas.length} atividades importadas.`);
+    substituirTudo(r.dados.titulo, r.dados.tarefas).then((ok) => ok && avisar(`${r.dados.tarefas.length} atividades importadas.`));
   }
 
   const acoesMenu = {
@@ -547,7 +672,16 @@
     exemplo: carregarExemplo,
     'apagar-tudo': () => {
       if (!estado.tarefas.length || !confirm(`Apagar as ${estado.tarefas.length} atividades deste cronograma? Essa ação não pode ser desfeita.`)) return;
-      if (substituirTudo(TITULO_PADRAO, [])) avisar('Cronograma apagado.');
+      substituirTudo(TITULO_PADRAO, []).then((ok) => ok && avisar('Cronograma apagado.'));
+    },
+    sair: async () => {
+      if (alteracoesPendentes || envioEmCurso) {
+        avisar('Aguarde terminar de salvar antes de sair.');
+        return;
+      }
+      await chamarApi('POST', 'api/logout');
+      aplicarDocumento({ revisao: 0, titulo: TITULO_PADRAO, tarefas: [] });
+      mostrarLogin();
     },
   };
 
@@ -637,14 +771,43 @@
     if (pressionouFundo && ev.target === dialogo) dialogo.close();
   });
 
-  window.addEventListener('storage', (ev) => {
-    if (ev.key === CHAVE_DADOS) sincronizar();
+  $('#form-login').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const botao = ev.target.querySelector('button[type=submit]');
+    botao.disabled = true;
+    const r = await chamarApi('POST', 'api/login', { senha: $('#senha').value });
+    botao.disabled = false;
+    if (r.status !== 200) {
+      $('#erro-login').textContent = r.dados?.erro || 'Não foi possível conectar ao servidor.';
+      $('#senha').select();
+      return;
+    }
+    if (alteracoesPendentes) {
+      entrarNoApp();
+      enviar();
+    } else if (await carregarDoServidor()) {
+      entrarNoApp();
+    }
   });
+
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) sincronizar();
+    else if (alteracoesPendentes) enviar({ aoSair: true });
   });
+  window.addEventListener('focus', sincronizar);
   window.addEventListener('pageshow', (ev) => {
     if (ev.persisted) sincronizar();
+  });
+  window.addEventListener('online', () => {
+    if (alteracoesPendentes) enviar();
+  });
+  window.addEventListener('pagehide', () => {
+    if (alteracoesPendentes) enviar({ aoSair: true });
+  });
+  window.addEventListener('beforeunload', (ev) => {
+    if (!alteracoesPendentes && !envioEmCurso) return;
+    ev.preventDefault();
+    ev.returnValue = '';
   });
   window.addEventListener('beforeprint', () => {
     const grade = caixaGantt.querySelector('.g-grade');
@@ -658,6 +821,6 @@
     if (grade) grade.style.zoom = '';
   });
 
-  carregar();
-  render();
+  carregarPrefs();
+  carregarDoServidor().then((ok) => ok && entrarNoApp());
 })();

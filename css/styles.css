@@ -134,6 +134,30 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .salvo::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--st-concluida); }
 .salvo.falhou { color: var(--perigo); font-weight: 600; }
 .salvo.falhou::before { background: var(--perigo); }
+.salvo.salvando::before { background: var(--ouro); }
+
+body:not([data-tela="app"]) .topo-titulo,
+body:not([data-tela="app"]) .topo-acoes,
+body[data-tela="carregando"] .conteudo,
+body[data-tela="login"] .conteudo,
+body:not([data-tela="login"]) .login { display: none; }
+body:not([data-tela="app"]) .marca { border-right: 0; }
+
+.login { min-height: calc(100dvh - 90px); display: grid; place-items: center; padding: 24px 16px; }
+.login-cartao {
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100%);
+  padding: 32px 28px;
+  background: var(--superficie);
+  border: 1px solid var(--borda);
+  border-radius: 20px;
+  box-shadow: var(--sombra-2);
+}
+.login-logo { width: 48px; height: 48px; margin-bottom: 16px; filter: drop-shadow(0 2px 6px rgba(212, 161, 42, 0.35)); }
+.login h1 { margin: 0 0 4px; font-size: 1.35rem; letter-spacing: -0.02em; }
+.login .dica { margin: 0 0 6px; }
+.login .btn { width: 100%; min-height: 44px; margin-top: 18px; }
 
 .topo-acoes { grid-area: acoes; display: flex; gap: 8px; align-items: center; }
 

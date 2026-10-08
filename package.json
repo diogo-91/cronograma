@@ -2,13 +2,16 @@
   "name": "cronograma",
   "version": "1.0.0",
   "private": true,
-  "description": "Ferramenta web para montar e acompanhar cronogramas de atividades (tabela e Gantt).",
+  "description": "Ferramenta web para montar e acompanhar cronogramas de atividades (tabela e Gantt), com servidor próprio.",
   "scripts": {
+    "start": "node servidor.js",
     "test": "node --test",
-    "test:e2e": "node e2e/app.e2e.js",
-    "start": "npx --yes serve ."
+    "test:e2e": "node e2e/app.e2e.js"
   },
   "devDependencies": {
     "playwright": "1.56.1"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

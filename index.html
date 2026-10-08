@@ -9,7 +9,7 @@
   <link rel="icon" href="img/logo-goldsystem.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/styles.css">
 </head>
-<body>
+<body data-tela="carregando">
   <header class="topo">
     <div class="marca">
       <img class="marca-icone" src="img/logo-goldsystem.svg" alt="" width="34" height="34">
@@ -17,7 +17,7 @@
     </div>
     <div class="topo-titulo">
       <input id="titulo" class="titulo" type="text" maxlength="120" aria-label="Nome do cronograma" autocomplete="off">
-      <span class="salvo" id="salvo">Salvo neste navegador</span>
+      <span class="salvo" id="salvo">Salvo no servidor</span>
     </div>
     <div class="topo-acoes">
       <details class="menu" id="menu">
@@ -29,6 +29,7 @@
           <button type="button" data-acao="imprimir"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5a1 1 0 0 1-1 1h-2"/><rect x="7" y="14" width="10" height="6" rx="1"/></svg>Imprimir / salvar PDF</button>
           <hr>
           <button type="button" data-acao="exemplo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Carregar exemplo</button>
+          <button type="button" data-acao="sair"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H4"/></svg>Sair</button>
           <button type="button" data-acao="apagar-tudo" class="perigo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>Apagar tudo</button>
         </div>
       </details>
@@ -38,6 +39,18 @@
       </button>
     </div>
   </header>
+
+  <section class="login" aria-labelledby="login-titulo">
+    <form id="form-login" class="login-cartao">
+      <img class="login-logo" src="img/logo-goldsystem.svg" alt="" width="48" height="48">
+      <h1 id="login-titulo">Entrar no cronograma</h1>
+      <p class="dica">Digite a senha definida no servidor.</p>
+      <label class="rotulo" for="senha">Senha</label>
+      <input id="senha" name="senha" class="campo" type="password" autocomplete="current-password" required aria-describedby="erro-login">
+      <p class="erro" id="erro-login" role="alert"></p>
+      <button type="submit" class="btn primario">Entrar</button>
+    </form>
+  </section>
 
   <main class="conteudo">
     <section class="resumo" id="resumo" aria-label="Resumo do cronograma"></section>

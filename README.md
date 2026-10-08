@@ -1,11 +1,18 @@
 # Cronograma · GoldSystem
 
-Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com datas de início e término, gráfico de Gantt, lista, filtros e exportação. Funciona no computador e no celular, sem servidor e sem cadastro.
+Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com datas de início e término, gráfico de Gantt, lista, filtros e exportação. Os dados ficam no servidor, então o mesmo cronograma aparece no computador e no celular. O acesso é protegido por senha.
 
-## Como usar
+## Publicar no Coolify
 
-- **No computador:** baixe o repositório e abra `index.html` no navegador (duplo clique funciona).
-- **Pelo celular ou link:** publique com GitHub Pages em *Settings → Pages → Build and deployment → Deploy from a branch*, escolha o branch com o código e a pasta `/ (root)`. O link fica `https://<usuario>.github.io/cronograma/`.
+1. Na aplicação do cronograma, em **Configuration → General**, troque o **Build Pack** para **Dockerfile** (o arquivo `Dockerfile` está na raiz do repositório).
+2. Em **Ports Exposes**, use `3000`.
+3. Em **Environment Variables**, crie `SENHA` com a senha de acesso (mínimo de 8 caracteres). Marque como segredo, se a opção existir.
+4. Em **Persistent Storage**, adicione um **Volume Mount** com destino (`Destination Path`) `/data`. É ali que fica o arquivo `cronograma.json`; sem o volume, os dados somem a cada novo deploy.
+5. Faça o **Deploy** e abra o endereço da aplicação. Prefira um domínio com `https://`, porque a senha trafega no login.
+
+Se o log mostrar `Sem permissão de escrita em /data`, o volume foi criado como pasta do servidor (bind mount) em vez de volume do Docker. Use **Volume Mount**.
+
+Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda está como Static.
 
 ## O que faz
 
@@ -15,31 +22,40 @@ Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com 
 - **Lista** em tabela no computador e em cartões no celular, com duplicar e excluir (com "Desfazer").
 - Resumo com progresso geral ponderado pela duração, contagem por status e período total.
 - Busca (ignora acentos e maiúsculas) e filtros por fase e status.
-- **Arquivo:** backup em JSON (exportar/importar), exportação CSV para Excel (separador `;`, datas dd/mm/aaaa), impressão / PDF.
+- **Arquivo:** backup em JSON (exportar/importar), exportação CSV para Excel (separador `;`, datas dd/mm/aaaa), impressão / PDF e Sair.
 - Tema claro, com a marca GoldSystem no topo e no ícone da aba.
 
 ## Onde ficam os dados
 
-No `localStorage` do navegador, salvos a cada alteração. Eles não saem do seu aparelho e não sincronizam entre navegadores. Para levar o cronograma a outro aparelho ou guardar uma cópia, use *Arquivo → Exportar backup (JSON)* e depois *Importar backup* no outro lugar. Limpar os dados do site no navegador apaga o cronograma.
+No servidor, no arquivo `cronograma.json` dentro do volume `/data`. Cada alteração é enviada logo depois de feita; o indicador abaixo do título mostra *Salvando…*, *Salvo no servidor* ou *Sem conexão: alterações pendentes* (nesse caso o app tenta de novo sozinho e reenvia quando a conexão volta).
+
+- **Vários aparelhos:** ao voltar para a aba, o app busca a versão mais recente. Se dois aparelhos editarem ao mesmo tempo sem atualizar, o segundo a gravar recebe a versão do primeiro e um aviso para refazer a última alteração, em vez de apagar o que o outro fez.
+- **Senha:** uma só, definida em `SENHA`. Quem tem a senha vê e edita o mesmo cronograma. A sessão dura 30 dias; trocar a senha encerra todas as sessões. Após 5 senhas erradas, o endereço que errou espera 15 minutos.
+- **Dados antigos do navegador:** se você usava a versão anterior (que salvava só no navegador), no primeiro acesso o app oferece enviar essas atividades para o servidor.
+- **Backup:** faça *Arquivo → Exportar backup (JSON)* de vez em quando, ou copie o volume `/data` pelo Coolify.
 
 ## Desenvolvimento
 
-Não há build: HTML, CSS e JavaScript puros.
+Não há build nem dependências de produção: HTML, CSS e JavaScript puros no navegador e Node.js puro no servidor.
 
 ```
-js/cronograma.js   lógica pura (datas, status, validação, filtros, resumo, escala do Gantt, CSV, importação)
-js/app.js          interface (renderização, diálogo, armazenamento, importar/exportar)
+servidor.js        servidor HTTP: arquivos do app, login, API do cronograma, gravação em arquivo
+js/cronograma.js   lógica pura (datas, status, validação, filtros, resumo, escala do Gantt, CSV, importação), usada no navegador e no servidor
+js/app.js          interface (renderização, diálogo, gravação no servidor, importar/exportar)
 css/styles.css     layout responsivo, tema e impressão
 img/               logo GoldSystem (topo e favicon)
-fonts/             fonte Inter embutida (licença OFL em fonts/OFL-Inter.txt), funciona sem internet
-tests/             testes unitários da lógica (node:test)
+fonts/             fonte Inter embutida (licença OFL em fonts/OFL-Inter.txt)
+tests/             testes unitários da lógica e do servidor (node:test)
 e2e/               teste ponta a ponta no navegador (Playwright)
+Dockerfile         imagem para o Coolify (Node 22, usuário sem privilégios, dados em /data)
 ```
 
 ```
-npm test                          # testes unitários, sem dependências
+SENHA=uma-senha-longa npm start   # http://localhost:3000, dados em ./dados
+npm test                          # testes unitários e do servidor, sem dependências
 npm install                       # instala o Playwright para o teste E2E
 npx playwright install chromium   # baixa o navegador, se ainda não tiver
-npm run test:e2e                  # desktop, sistema em modo escuro e celular (360, 390, 768 px); prints em e2e/saida/
-npm start                         # servidor local opcional
+npm run test:e2e                  # login, vários aparelhos, conflito, queda de rede, celular e desktop; prints em e2e/saida/
 ```
+
+Variáveis do servidor: `SENHA` (obrigatória), `PORTA` (padrão `3000`) e `PASTA_DADOS` (padrão `./dados`; no Docker, `/data`).
