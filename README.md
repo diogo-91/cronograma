@@ -11,7 +11,7 @@ Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com 
 
 - Atividades com nome, fase, responsável, início, término, progresso (%) e notas.
 - Status automático pela data de hoje: *Não iniciada*, *Em andamento*, *Atrasada* (passou do término sem 100%) e *Concluída*.
-- **Gantt** com escala por dia, semana ou mês, linha de hoje, cores por fase e barra de progresso. Clique na barra ou no nome para editar.
+- **Gantt** com escala por dia, semana ou mês, linha de hoje, cores por fase e barra de progresso. Clique na barra ou no nome para editar. Em períodos longos a escala engrossa sozinha (dia até ~3 anos, semana até ~20 anos).
 - **Lista** em tabela no computador e em cartões no celular, com duplicar e excluir (com "Desfazer").
 - Resumo com progresso geral ponderado pela duração, contagem por status e período total.
 - Busca (ignora acentos e maiúsculas) e filtros por fase e status.

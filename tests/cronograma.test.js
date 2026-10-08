@@ -182,3 +182,36 @@ test('indicesDeCor dá a cada fase um índice estável pela ordem alfabética', 
 test('formatarData converte ISO para dd/mm/aaaa', () => {
   assert.equal(C.formatarData('2026-01-09'), '09/01/2026');
 });
+
+test('diaNumero aceita só anos de 1900 a 2199, barrando anos intermediários da digitação', () => {
+  assert.ok(Number.isNaN(C.diaNumero('0202-10-08')));
+  assert.ok(Number.isNaN(C.diaNumero('1899-12-31')));
+  assert.ok(Number.isNaN(C.diaNumero('2200-01-01')));
+  assert.ok(Number.isFinite(C.diaNumero('1900-01-01')));
+  assert.ok(Number.isFinite(C.diaNumero('2199-12-31')));
+  assert.equal(C.validarTarefa({ nome: 'A', inicio: '0202-10-08', fim: '2026-10-14' }).ok, false);
+});
+
+test('resumo só mostra 100% quando todo o trabalho está concluído', () => {
+  const lista = [
+    tarefa({ inicio: '2026-01-01', fim: '2026-12-31', progresso: 100 }),
+    tarefa({ inicio: '2027-01-01', fim: '2027-01-01', progresso: 0 }),
+  ];
+  assert.equal(C.resumo(lista, HOJE).progressoGeral, 99);
+});
+
+test('escalaGantt troca para escala mais grossa quando o período é longo demais', () => {
+  const curta = [tarefa({ id: 'a', inicio: '2026-10-01', fim: '2027-06-30' })];
+  const anos = [tarefa({ id: 'a', inicio: '2026-01-01', fim: '2030-12-31' })];
+  const decadas = [tarefa({ id: 'a', inicio: '2026-01-01', fim: '2060-12-31' })];
+  assert.equal(C.escalaGantt(curta, 'dia', HOJE).zoom, 'dia');
+  assert.equal(C.escalaGantt(anos, 'dia', HOJE).zoom, 'semana');
+  assert.equal(C.escalaGantt(decadas, 'dia', HOJE).zoom, 'mes');
+  assert.equal(C.escalaGantt(decadas, 'semana', HOJE).zoom, 'mes');
+  assert.equal(C.escalaGantt(anos, 'mes', HOJE).zoom, 'mes');
+  assert.equal(C.escalaGantt(decadas, 'dia', HOJE).marcas.length, 0);
+  assert.equal(C.zoomEfetivo(curta, 'dia'), 'dia');
+  assert.equal(C.zoomEfetivo(anos, 'dia'), 'semana');
+  assert.equal(C.zoomEfetivo(anos, 'semana'), 'semana');
+  assert.equal(C.zoomEfetivo([], 'dia'), 'dia');
+});

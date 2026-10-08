@@ -5,6 +5,9 @@ const Cronograma = (() => {
   const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
   const PX_POR_DIA = { dia: 36, semana: 14, mes: 5 };
   const FOLGA_DIAS = { dia: 2, semana: 7, mes: 15 };
+  const MAX_DIAS_ZOOM = { dia: 1100, semana: 7300 };
+  const ANO_MINIMO = 1900;
+  const ANO_MAXIMO = 2199;
   const ROTULO_STATUS = {
     pendente: 'Não iniciada',
     andamento: 'Em andamento',
@@ -18,6 +21,7 @@ const Cronograma = (() => {
     const ano = Number(m[1]);
     const mes = Number(m[2]) - 1;
     const dia = Number(m[3]);
+    if (ano < ANO_MINIMO || ano > ANO_MAXIMO) return NaN;
     const data = new Date(Date.UTC(ano, mes, dia));
     if (data.getUTCFullYear() !== ano || data.getUTCMonth() !== mes || data.getUTCDate() !== dia) return NaN;
     return data.getTime() / MS_DIA;
@@ -94,7 +98,7 @@ const Cronograma = (() => {
   }
 
   function normalizar(valor) {
-    return valor.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+    return valor.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
   }
 
   function filtrarTarefas(tarefas, { texto: busca = '', fase = '', status = '' }, hoje) {
@@ -121,17 +125,27 @@ const Cronograma = (() => {
       if (!r.inicio || t.inicio < r.inicio) r.inicio = t.inicio;
       if (!r.fim || t.fim > r.fim) r.fim = t.fim;
     }
-    r.progressoGeral = Math.round(feito / pesoTotal);
+    r.progressoGeral = Math.floor(feito / pesoTotal);
     r.dias = diaNumero(r.fim) - diaNumero(r.inicio) + 1;
     return r;
   }
 
-  function escalaGantt(tarefas, zoom, hoje) {
-    const pxDia = PX_POR_DIA[zoom];
-    const folga = FOLGA_DIAS[zoom];
+  function zoomEfetivo(tarefas, zoomPedido) {
+    if (!tarefas.length) return zoomPedido;
+    const dias = Math.max(...tarefas.map((t) => diaNumero(t.fim))) - Math.min(...tarefas.map((t) => diaNumero(t.inicio))) + 1;
+    let zoom = zoomPedido;
+    if (zoom === 'dia' && dias > MAX_DIAS_ZOOM.dia) zoom = 'semana';
+    if (zoom === 'semana' && dias > MAX_DIAS_ZOOM.semana) zoom = 'mes';
+    return zoom;
+  }
+
+  function escalaGantt(tarefas, zoomPedido, hoje) {
     const h = diaNumero(hoje);
     let inicioDia = tarefas.length ? Math.min(...tarefas.map((t) => diaNumero(t.inicio))) : h;
     let fimDia = tarefas.length ? Math.max(...tarefas.map((t) => diaNumero(t.fim))) : h;
+    const zoom = zoomEfetivo(tarefas, zoomPedido);
+    const pxDia = PX_POR_DIA[zoom];
+    const folga = FOLGA_DIAS[zoom];
     inicioDia -= folga;
     fimDia += folga;
     if (zoom === 'semana') {
@@ -172,6 +186,7 @@ const Cronograma = (() => {
     }
 
     return {
+      zoom,
       pxDia,
       inicioDia,
       totalDias,
@@ -249,6 +264,7 @@ const Cronograma = (() => {
     ordenarTarefas,
     filtrarTarefas,
     resumo,
+    zoomEfetivo,
     escalaGantt,
     paraCSV,
     novoId,

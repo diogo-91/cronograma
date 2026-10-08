@@ -189,6 +189,107 @@ fs.mkdirSync(OUT, { recursive: true });
     await m.page.screenshot({ path: path.join(OUT, `14-${nome}-menu.png`) });
   }
 
+  // ---------- Correções da revisão ----------
+  const salvarTarefa = async (pg, nome, inicio, fim) => {
+    await pg.click('#btn-nova');
+    await pg.fill('#f-nome', nome);
+    if (inicio) await pg.fill('#f-inicio', inicio);
+    if (fim) await pg.fill('#f-fim', fim);
+    await pg.click('#form-tarefa button[type=submit]');
+  };
+
+  // foco volta para a atividade salva; anúncio para leitor de tela
+  await page.click('[data-visao=gantt]');
+  await salvarTarefa(page, 'Foco depois de salvar');
+  assert.equal(await page.evaluate(() => document.activeElement.textContent.includes('Foco depois de salvar')), true, 'foco na atividade salva');
+  assert.equal(await page.textContent('#anuncio'), 'Atividade salva.');
+
+  // progresso com texto inválido no campo numérico não vira 0% em silêncio
+  await page.click('#btn-nova');
+  await page.fill('#f-nome', 'Progresso inválido');
+  await page.fill('#f-progresso', '');
+  await page.focus('#f-progresso');
+  await page.keyboard.type('5e');
+  await page.click('#form-tarefa button[type=submit]');
+  assert.equal(await page.textContent('#e-progresso'), 'Digite um número de 0 a 100.');
+  await page.click('#dialogo [data-fechar].btn');
+
+  // digitar o ano no início não manda o término para o ano 3851
+  await page.click('#btn-nova');
+  await page.fill('#f-nome', 'Ano digitado');
+  await page.fill('#f-inicio', '2026-10-08');
+  await page.dispatchEvent('#f-inicio', 'change');
+  await page.fill('#f-fim', '2026-10-14');
+  await page.dispatchEvent('#f-fim', 'change');
+  await page.focus('#f-inicio');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('2027');
+  const inicioDigitado = await page.inputValue('#f-inicio');
+  const fimDigitado = await page.inputValue('#f-fim');
+  assert.equal(inicioDigitado.slice(0, 4), '2027', 'ano digitado no início: ' + inicioDigitado);
+  assert.ok(fimDigitado < '2100', 'término não explode: ' + fimDigitado);
+  await page.click('#dialogo [data-fechar].btn');
+
+  // impressão encolhe o Gantt para caber na página e desfaz depois
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+  const zoomImpressao = Number(await page.evaluate(() => document.querySelector('.g-grade').style.zoom));
+  assert.ok(zoomImpressao > 0 && zoomImpressao < 1, 'zoom de impressão: ' + zoomImpressao);
+  await page.pdf({ path: path.join(OUT, '08-impressao-gantt.pdf'), landscape: true, printBackground: true });
+  await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  assert.equal(await page.evaluate(() => document.querySelector('.g-grade').style.zoom), '');
+
+  // filtro invisível não esconde a primeira atividade de um cronograma vazio
+  await page.selectOption('#filtro-status', 'atrasada');
+  await page.click('#menu summary');
+  await page.click('[data-acao=apagar-tudo]');
+  await salvarTarefa(page, 'Primeira de novo');
+  assert.equal(await page.locator('.g-barra').count(), 1, 'atividade nova visível');
+
+  // período longo: escala por dia fica indisponível e cai para semana
+  await salvarTarefa(page, 'Cinco anos', '2026-01-01', '2030-12-31');
+  await page.click('[data-zoom=semana]');
+  assert.equal(await page.isDisabled('[data-zoom=dia]'), true);
+  assert.equal(await page.getAttribute('[data-zoom=semana]', 'aria-pressed'), 'true');
+  await salvarTarefa(page, 'Trinta anos', '2026-01-01', '2056-12-31');
+  assert.equal(await page.getAttribute('[data-zoom=mes]', 'aria-pressed'), 'true');
+  assert.equal(await page.isDisabled('[data-zoom=semana]'), true);
+
+  // outra aba mudou os dados: ao voltar para a aba, recarrega em vez de sobrescrever
+  await page.evaluate(() => {
+    localStorage.setItem('cronograma:v1', JSON.stringify({ titulo: 'Editado na outra aba', tarefas: [{ id: 'z', nome: 'Da outra aba', inicio: '2026-10-01', fim: '2026-10-02', progresso: 0 }] }));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  assert.equal(await page.inputValue('#titulo'), 'Editado na outra aba');
+  assert.deepEqual(await page.locator('.g-nome-texto').allTextContents(), ['Da outra aba']);
+
+  // armazenamento cheio: nada de "Atividade salva" falso, indicador fica visível no celular
+  const cheio = await nova({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
+  await cheio.page.goto(URL_APP);
+  await cheio.page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException('cheio', 'QuotaExceededError'); }; });
+  await salvarTarefa(cheio.page, 'Não cabe');
+  assert.match(await cheio.page.textContent('#toast'), /não permitiu salvar/);
+  assert.equal(await cheio.page.isVisible('#salvo'), true, 'indicador de falha visível em 360px');
+  assert.match(await cheio.page.textContent('#salvo'), /Não foi salvo/);
+
+  // dado salvo ilegível: guarda cópia e oferece download antes de qualquer gravação
+  const ilegivel = await nova({ viewport: { width: 1366, height: 860 } });
+  await ilegivel.page.goto(URL_APP);
+  await ilegivel.page.evaluate(() => localStorage.setItem('cronograma:v1', '{conteudo quebrado'));
+  await ilegivel.page.reload();
+  assert.match(await ilegivel.page.textContent('#toast'), /ilegível/);
+  assert.equal(await ilegivel.page.isVisible('#toast button:has-text("Baixar cópia")'), true);
+  await salvarTarefa(ilegivel.page, 'Depois do problema');
+  assert.equal(await ilegivel.page.evaluate(() => localStorage.getItem('cronograma:v1:ilegivel')), '{conteudo quebrado');
+
+  // celular: botão flutuante tem nome acessível; diálogo sem rolagem dupla em tela baixa
+  const baixo = await nova({ viewport: { width: 360, height: 560 }, isMobile: true, hasTouch: true });
+  await baixo.page.goto(URL_APP);
+  assert.equal(await baixo.page.getByRole('button', { name: 'Nova atividade', exact: true }).isVisible(), true);
+  await baixo.page.click('#btn-nova');
+  const rolagemDupla = await baixo.page.evaluate(() => { const d = document.querySelector('#dialogo'); return d.scrollHeight - d.clientHeight; });
+  assert.equal(rolagemDupla, 0, 'diálogo não rola por fora do formulário');
+
   await browser.close();
   assert.deepEqual(erros, [], 'sem erros no console');
   console.log('E2E OK');

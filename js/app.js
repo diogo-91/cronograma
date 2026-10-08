@@ -4,11 +4,13 @@
   const C = Cronograma;
   const CHAVE_DADOS = 'cronograma:v1';
   const CHAVE_PREFS = 'cronograma:prefs';
+  const CHAVE_RECUPERACAO = 'cronograma:v1:ilegivel';
   const TITULO_PADRAO = 'Meu cronograma';
   const VISOES = ['gantt', 'tabela'];
   const ZOOMS = ['dia', 'semana', 'mes'];
   const NUM_CORES = 8;
   const TAMANHO_MAXIMO_IMPORTACAO = 5 * 1024 * 1024;
+  const LARGURA_IMPRESSAO = 960;
   const CAMPOS = ['nome', 'fase', 'responsavel', 'inicio', 'fim', 'progresso', 'notas'];
   const ICONES = {
     duplicar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
@@ -32,6 +34,7 @@
   let hojeNoGantt = null;
   let duracaoEditada = 7;
   let temporizadorAviso = null;
+  let ultimoBruto = null;
 
   function el(tag, props = {}, ...filhos) {
     const e = document.createElement(tag);
@@ -80,13 +83,18 @@
     estado.titulo = TITULO_PADRAO;
     estado.tarefas = [];
     const bruto = ler(CHAVE_DADOS);
+    ultimoBruto = bruto;
     if (bruto) {
       const r = C.importarDados(bruto);
       if (r.ok) {
         estado.titulo = r.dados.titulo;
         estado.tarefas = r.dados.tarefas;
       } else {
-        avisar('Não foi possível ler o cronograma salvo neste navegador.');
+        gravar(CHAVE_RECUPERACAO, bruto);
+        avisar('O cronograma salvo neste navegador está ilegível. Uma cópia foi guardada à parte.', {
+          rotulo: 'Baixar cópia',
+          executar: () => baixar('cronograma-ilegivel.json', bruto, 'application/json'),
+        });
       }
     }
     let prefs = {};
@@ -100,9 +108,19 @@
   }
 
   function salvar() {
-    const ok = gravar(CHAVE_DADOS, JSON.stringify({ versao: 1, titulo: estado.titulo, tarefas: estado.tarefas }));
-    $('#salvo').textContent = ok ? 'Salvo neste navegador' : 'Não foi salvo: exporte um backup';
+    const bruto = JSON.stringify({ versao: 1, titulo: estado.titulo, tarefas: estado.tarefas });
+    const ok = gravar(CHAVE_DADOS, bruto);
+    if (ok) ultimoBruto = bruto;
+    const indicador = $('#salvo');
+    indicador.textContent = ok ? 'Salvo neste navegador' : 'Não foi salvo: exporte um backup';
+    indicador.classList.toggle('falhou', !ok);
     if (!ok) avisar('O navegador não permitiu salvar. Use Arquivo → Exportar backup para não perder os dados.');
+    return ok;
+  }
+
+  function sincronizar() {
+    if (ler(CHAVE_DADOS) !== ultimoBruto) carregar();
+    render();
   }
 
   function salvarPrefs() {
@@ -114,6 +132,7 @@
     toast.replaceChildren(el('span', {}, mensagem));
     if (acao) toast.append(el('button', { type: 'button', onclick: () => { toast.hidden = true; acao.executar(); } }, acao.rotulo));
     toast.hidden = false;
+    $('#anuncio').textContent = mensagem;
     clearTimeout(temporizadorAviso);
     temporizadorAviso = setTimeout(() => { toast.hidden = true; }, acao ? 7000 : 3500);
   }
@@ -122,6 +141,7 @@
     const hoje = C.hojeISO();
     const cores = C.indicesDeCor(estado.tarefas);
     if (estado.filtros.fase && !cores.has(estado.filtros.fase)) estado.filtros.fase = '';
+    if (estado.tarefas.length === 0) zerarFiltros();
     const visiveis = C.filtrarTarefas(C.ordenarTarefas(estado.tarefas), estado.filtros, hoje);
     const filtrando = Boolean(estado.filtros.texto || estado.filtros.fase || estado.filtros.status);
     const semTarefas = estado.tarefas.length === 0;
@@ -130,7 +150,6 @@
     document.title = `${estado.titulo.trim() || TITULO_PADRAO} · Cronograma`;
     if (document.activeElement !== $('#titulo')) $('#titulo').value = estado.titulo;
     for (const b of document.querySelectorAll('[data-visao]')) b.setAttribute('aria-pressed', String(b.dataset.visao === estado.visao));
-    for (const b of document.querySelectorAll('[data-zoom]')) b.setAttribute('aria-pressed', String(b.dataset.zoom === estado.zoom));
 
     $('#resumo').hidden = semTarefas;
     $('.ferramentas').hidden = semTarefas;
@@ -195,9 +214,14 @@
     const e = C.escalaGantt(lista, estado.zoom, hoje);
     const px = (n) => `${n}px`;
     hojeNoGantt = e.hojeLeft === null ? null : e.hojeLeft + e.pxDia / 2;
+    for (const b of document.querySelectorAll('[data-zoom]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.zoom === e.zoom));
+      b.disabled = C.zoomEfetivo(lista, b.dataset.zoom) !== b.dataset.zoom;
+      b.title = b.disabled ? 'Período longo demais para esta escala' : '';
+    }
 
     const fundo = el('div', { class: 'g-fundo' });
-    for (const divisao of estado.zoom === 'mes' ? e.meses : e.marcas) {
+    for (const divisao of e.zoom === 'mes' ? e.meses : e.marcas) {
       if (divisao.fimDeSemana) fundo.append(el('div', { class: 'g-fds', style: { left: px(divisao.left), width: px(divisao.width) } }));
       fundo.append(el('div', { class: 'g-linha-v', style: { left: px(divisao.left) } }));
     }
@@ -207,7 +231,7 @@
       ...e.meses.map((m) => el('div', { class: 'g-mes', style: { left: px(m.left), width: px(m.width) } }, el('span', {}, m.rotulo))),
       ...e.marcas.map((m) =>
         el('div', {
-          class: `g-marca${m.fimDeSemana ? ' fds' : ''}${estado.zoom === 'semana' ? ' semana' : ''}${m.left === e.hojeLeft && estado.zoom === 'dia' ? ' hoje' : ''}`,
+          class: `g-marca${m.fimDeSemana ? ' fds' : ''}${e.zoom === 'semana' ? ' semana' : ''}${m.left === e.hojeLeft && e.zoom === 'dia' ? ' hoje' : ''}`,
           style: { left: px(m.left), width: px(m.width) },
         }, m.rotulo)),
       hojeNoGantt !== null && el('div', { class: 'g-hoje-marcador', title: `Hoje, ${C.formatarData(hoje)}`, style: { left: px(hojeNoGantt) } }),
@@ -218,7 +242,7 @@
       const barra = e.barras[t.id];
       const descricao = `${t.nome}: ${C.formatarData(t.inicio)} a ${C.formatarData(t.fim)}, ${t.progresso}% concluído, ${C.ROTULO_STATUS[status]}`;
       return el('div', { class: 'g-linha', style: { '--cor': corDa(t, cores) } },
-        el('button', { type: 'button', class: 'g-nome', title: t.nome, onclick: () => abrirEditor(t.id) },
+        el('button', { type: 'button', class: 'g-nome', title: t.nome, 'data-id': t.id, onclick: () => abrirEditor(t.id) },
           el('span', { class: 'g-nome-texto' }, t.nome),
           el('span', { class: 'g-nome-datas' }, `${dataCurta(t.inicio)} – ${dataCurta(t.fim)}`)),
         el('div', { class: 'g-trilho' },
@@ -267,7 +291,7 @@
       const dias = C.duracaoDias(t);
       return el('tr', { style: { '--cor': corDa(t, cores) } },
         el('td', { class: 'c-nome' },
-          el('button', { type: 'button', class: 'nome-link', onclick: () => abrirEditor(t.id) }, el('span', { class: 'ponto' }), el('span', {}, t.nome)),
+          el('button', { type: 'button', class: 'nome-link', 'data-id': t.id, onclick: () => abrirEditor(t.id) }, el('span', { class: 'ponto' }), el('span', {}, t.nome)),
           t.notas && el('div', { class: 'notas' }, t.notas)),
         celula('Fase', t.fase, 'c-fase'),
         celula('Responsável', t.responsavel, 'c-resp'),
@@ -342,8 +366,9 @@
   function salvarEditor(evento) {
     evento.preventDefault();
     const r = C.validarTarefa(Object.fromEntries(new FormData(form)));
+    if (form.elements.progresso.validity.badInput) r.erros.progresso = 'Digite um número de 0 a 100.';
     mostrarErros(r.erros);
-    if (!r.ok) {
+    if (Object.keys(r.erros).length) {
       form.querySelector('[aria-invalid="true"]').focus();
       return;
     }
@@ -352,24 +377,39 @@
     if (indice >= 0) estado.tarefas[indice] = tarefa;
     else estado.tarefas.push(tarefa);
     dialogo.close();
-    salvar();
+    const salvou = salvar();
     render();
+    focarTarefa(tarefa.id);
+    if (!salvou) return;
     const oculta = C.filtrarTarefas([tarefa], estado.filtros, C.hojeISO()).length === 0;
     avisar(oculta ? 'Atividade salva, mas oculta pelos filtros atuais.' : 'Atividade salva.', oculta && { rotulo: 'Limpar filtros', executar: limparFiltros });
   }
 
+  function focarTarefa(id) {
+    const alvo = [...document.querySelectorAll('[data-id]')].find((e) => e.dataset.id === id && e.offsetParent);
+    if (alvo) alvo.focus();
+    else $('#btn-nova').focus({ preventScroll: true });
+  }
+
   function excluir(id) {
     const indice = estado.tarefas.findIndex((t) => t.id === id);
-    if (indice < 0) return;
+    if (indice < 0) {
+      render();
+      avisar('Essa atividade já tinha sido excluída.');
+      return;
+    }
     const [removida] = estado.tarefas.splice(indice, 1);
-    salvar();
+    const salvou = salvar();
     render();
+    focarTarefa(null);
+    if (!salvou) return;
     avisar(`"${removida.nome}" excluída.`, {
       rotulo: 'Desfazer',
       executar: () => {
         estado.tarefas.push(removida);
         salvar();
         render();
+        focarTarefa(removida.id);
       },
     });
   }
@@ -377,28 +417,33 @@
   function duplicar(id) {
     const original = estado.tarefas.find((t) => t.id === id);
     if (!original) return;
-    estado.tarefas.push({ ...original, id: C.novoId(), nome: `${original.nome} (cópia)`, progresso: 0 });
-    salvar();
+    const copia = { ...original, id: C.novoId(), nome: `${original.nome} (cópia)`, progresso: 0 };
+    estado.tarefas.push(copia);
+    const salvou = salvar();
     render();
-    avisar('Atividade duplicada.');
+    focarTarefa(copia.id);
+    if (salvou) avisar('Atividade duplicada.');
   }
 
-  function limparFiltros() {
+  function zerarFiltros() {
     estado.filtros = { texto: '', fase: '', status: '' };
     $('#busca').value = '';
     $('#filtro-status').value = '';
+  }
+
+  function limparFiltros() {
+    zerarFiltros();
     render();
   }
 
   function substituirTudo(titulo, tarefas) {
     estado.titulo = titulo;
     estado.tarefas = tarefas;
-    estado.filtros = { texto: '', fase: '', status: '' };
-    $('#busca').value = '';
-    $('#filtro-status').value = '';
+    zerarFiltros();
     rolarParaHoje = true;
-    salvar();
+    const salvou = salvar();
     render();
+    return salvou;
   }
 
   function carregarExemplo() {
@@ -416,14 +461,14 @@
       ['Publicação', 'Lançamento', 'Diego', 25, 25, 0],
       ['Divulgação', 'Lançamento', 'Ana', 26, 33, 0],
     ];
-    substituirTudo('Lançamento do site (exemplo)', itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
+    const salvou = substituirTudo('Lançamento do site (exemplo)', itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
       id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso, notas: '',
     })));
-    avisar('Exemplo carregado. Edite ou apague à vontade.');
+    if (salvou) avisar('Exemplo carregado. Edite ou apague à vontade.');
   }
 
   function nomeArquivo() {
-    const base = (estado.titulo || TITULO_PADRAO).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    const base = (estado.titulo || TITULO_PADRAO).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
       .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
     return `cronograma-${base || 'meu'}-${C.hojeISO()}`;
   }
@@ -451,8 +496,7 @@
       return;
     }
     if (estado.tarefas.length && !confirm(`Substituir o cronograma atual (${estado.tarefas.length} atividades) pelo conteúdo de "${arquivo.name}"?`)) return;
-    substituirTudo(r.dados.titulo, r.dados.tarefas);
-    avisar(`${r.dados.tarefas.length} atividades importadas.`);
+    if (substituirTudo(r.dados.titulo, r.dados.tarefas)) avisar(`${r.dados.tarefas.length} atividades importadas.`);
   }
 
   const acoesMenu = {
@@ -464,8 +508,7 @@
     exemplo: carregarExemplo,
     'apagar-tudo': () => {
       if (!estado.tarefas.length || !confirm(`Apagar as ${estado.tarefas.length} atividades deste cronograma? Essa ação não pode ser desfeita.`)) return;
-      substituirTudo(TITULO_PADRAO, []);
-      avisar('Cronograma apagado.');
+      if (substituirTudo(TITULO_PADRAO, [])) avisar('Cronograma apagado.');
     },
   };
 
@@ -548,12 +591,24 @@
   });
 
   window.addEventListener('storage', (ev) => {
-    if (ev.key !== CHAVE_DADOS) return;
-    carregar();
-    render();
+    if (ev.key === CHAVE_DADOS) sincronizar();
   });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) render();
+    if (!document.hidden) sincronizar();
+  });
+  window.addEventListener('pageshow', (ev) => {
+    if (ev.persisted) sincronizar();
+  });
+  window.addEventListener('beforeprint', () => {
+    const grade = caixaGantt.querySelector('.g-grade');
+    if (!grade || caixaGantt.hidden) return;
+    const colunaNome = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--col-nome-impressao'));
+    const larguraNecessaria = colunaNome + parseFloat(grade.style.getPropertyValue('--largura'));
+    grade.style.zoom = String(Math.min(1, LARGURA_IMPRESSAO / larguraNecessaria));
+  });
+  window.addEventListener('afterprint', () => {
+    const grade = caixaGantt.querySelector('.g-grade');
+    if (grade) grade.style.zoom = '';
   });
 
   carregar();

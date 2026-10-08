@@ -29,7 +29,7 @@
           <button type="button" data-acao="apagar-tudo" class="perigo">Apagar tudo</button>
         </div>
       </details>
-      <button type="button" class="btn primario btn-nova" id="btn-nova">
+      <button type="button" class="btn primario btn-nova" id="btn-nova" aria-label="Nova atividade">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <span>Nova atividade</span>
       </button>
@@ -133,7 +133,8 @@
   <datalist id="lista-fases"></datalist>
   <datalist id="lista-responsaveis"></datalist>
   <input type="file" id="arquivo" accept="application/json,.json" hidden>
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="anuncio" class="so-leitor" role="status" aria-live="polite"></div>
 
   <script src="js/cronograma.js"></script>
   <script src="js/app.js"></script>
