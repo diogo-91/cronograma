@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#14161c" media="(prefers-color-scheme: dark)">
+  <title>Cronograma</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='4' width='20' height='17' rx='3' fill='%234f6bed'/%3E%3Crect x='5' y='9' width='8' height='3' rx='1.5' fill='white'/%3E%3Crect x='9' y='14' width='9' height='3' rx='1.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <input id="titulo" class="titulo" type="text" maxlength="120" aria-label="Nome do cronograma" autocomplete="off">
+      <span class="salvo" id="salvo">Salvo neste navegador</span>
+    </div>
+    <div class="topo-acoes">
+      <details class="menu" id="menu">
+        <summary class="btn" aria-label="Opções do arquivo">Arquivo</summary>
+        <div class="menu-itens">
+          <button type="button" data-acao="exportar-json">Exportar backup (JSON)</button>
+          <button type="button" data-acao="importar-json">Importar backup (JSON)</button>
+          <button type="button" data-acao="exportar-csv">Exportar para Excel (CSV)</button>
+          <button type="button" data-acao="imprimir">Imprimir / salvar PDF</button>
+          <hr>
+          <button type="button" data-acao="exemplo">Carregar exemplo</button>
+          <button type="button" data-acao="apagar-tudo" class="perigo">Apagar tudo</button>
+        </div>
+      </details>
+      <button type="button" class="btn primario btn-nova" id="btn-nova">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Nova atividade</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="conteudo">
+    <section class="resumo" id="resumo" aria-label="Resumo do cronograma"></section>
+
+    <section class="ferramentas" aria-label="Filtros e visualização">
+      <input id="busca" class="campo busca" type="search" placeholder="Buscar atividade, fase, responsável…" aria-label="Buscar">
+      <select id="filtro-fase" class="campo" aria-label="Filtrar por fase"></select>
+      <select id="filtro-status" class="campo" aria-label="Filtrar por status">
+        <option value="">Todos os status</option>
+        <option value="pendente">Não iniciada</option>
+        <option value="andamento">Em andamento</option>
+        <option value="atrasada">Atrasada</option>
+        <option value="concluida">Concluída</option>
+      </select>
+      <div class="modos">
+      <div class="segmentado" role="group" aria-label="Visualização">
+        <button type="button" data-visao="gantt">Gantt</button>
+        <button type="button" data-visao="tabela">Lista</button>
+      </div>
+      <div class="segmentado" role="group" aria-label="Escala do Gantt" id="grupo-zoom">
+        <button type="button" data-zoom="dia">Dia</button>
+        <button type="button" data-zoom="semana">Semana</button>
+        <button type="button" data-zoom="mes">Mês</button>
+        <button type="button" id="btn-hoje">Hoje</button>
+      </div>
+      </div>
+    </section>
+
+    <section id="vista-gantt" class="gantt" aria-label="Gráfico de Gantt" tabindex="0"></section>
+    <section id="vista-tabela" class="lista" aria-label="Lista de atividades"></section>
+    <section id="vazio" class="vazio" hidden></section>
+  </main>
+
+  <dialog id="dialogo" aria-labelledby="dialogo-titulo">
+    <form id="form-tarefa" novalidate>
+      <header class="dialogo-topo">
+        <h2 id="dialogo-titulo">Nova atividade</h2>
+        <button type="button" class="btn-icone" data-fechar aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="dialogo-corpo">
+        <label class="rotulo" for="f-nome">Atividade *</label>
+        <input id="f-nome" name="nome" class="campo" type="text" maxlength="200" required autocomplete="off" aria-describedby="e-nome">
+        <p class="erro" id="e-nome" data-erro="nome"></p>
+
+        <div class="duas-colunas">
+          <div>
+            <label class="rotulo" for="f-fase">Fase / etapa</label>
+            <input id="f-fase" name="fase" class="campo" type="text" maxlength="80" list="lista-fases" autocomplete="off">
+          </div>
+          <div>
+            <label class="rotulo" for="f-responsavel">Responsável</label>
+            <input id="f-responsavel" name="responsavel" class="campo" type="text" maxlength="80" list="lista-responsaveis" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="duas-colunas">
+          <div>
+            <label class="rotulo" for="f-inicio">Início *</label>
+            <input id="f-inicio" name="inicio" class="campo" type="date" required aria-describedby="e-inicio">
+            <p class="erro" id="e-inicio" data-erro="inicio"></p>
+          </div>
+          <div>
+            <label class="rotulo" for="f-fim">Término *</label>
+            <input id="f-fim" name="fim" class="campo" type="date" required aria-describedby="e-fim f-duracao">
+            <p class="erro" id="e-fim" data-erro="fim"></p>
+          </div>
+        </div>
+        <p class="dica" id="f-duracao"></p>
+
+        <label class="rotulo" for="f-progresso">Progresso</label>
+        <div class="progresso-campo">
+          <input id="f-progresso-faixa" type="range" min="0" max="100" step="5" aria-label="Progresso (controle deslizante)">
+          <div class="progresso-numero">
+            <input id="f-progresso" name="progresso" class="campo" type="number" min="0" max="100" step="1" inputmode="numeric" aria-describedby="e-progresso">
+            <span>%</span>
+          </div>
+        </div>
+        <p class="erro" id="e-progresso" data-erro="progresso"></p>
+
+        <label class="rotulo" for="f-notas">Notas</label>
+        <textarea id="f-notas" name="notas" class="campo" rows="3" maxlength="2000"></textarea>
+      </div>
+
+      <footer class="dialogo-rodape">
+        <button type="button" class="btn perigo-texto" id="btn-excluir">Excluir</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn" data-fechar>Cancelar</button>
+        <button type="submit" class="btn primario">Salvar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <datalist id="lista-fases"></datalist>
+  <datalist id="lista-responsaveis"></datalist>
+  <input type="file" id="arquivo" accept="application/json,.json" hidden>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="js/cronograma.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
