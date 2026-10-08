@@ -47,10 +47,11 @@ fs.mkdirSync(OUT, { recursive: true });
     await pg.click('#form-tarefa button[type=submit]');
   };
   const logo = async (pg, onde) => {
-    assert.equal(await pg.textContent('.marca-nome'), 'GoldSystem', `${onde}: nome da logo`);
-    assert.ok(await pg.isVisible('.marca'), `${onde}: logo visível`);
-    assert.ok(await pg.evaluate(() => document.querySelector('.marca-icone').naturalWidth > 0), `${onde}: ícone da logo carregou`);
-    assert.equal(await pg.getAttribute('link[rel=icon]', 'href'), 'img/logo-goldsystem.svg', `${onde}: favicon`);
+    assert.equal(await pg.getAttribute('.marca-logo', 'alt'), 'GoldSystem', `${onde}: nome da logo`);
+    assert.ok(await pg.isVisible('.marca-logo'), `${onde}: logo visível`);
+    assert.ok(await pg.evaluate(() => document.querySelector('.marca-logo').naturalWidth > 0), `${onde}: imagem da logo carregou`);
+    assert.equal(await pg.getAttribute('link[rel=icon]', 'href'), 'img/icone-goldsystem.png', `${onde}: favicon`);
+    assert.equal(await pg.evaluate(() => fetch('img/icone-goldsystem.png').then((r) => r.status)), 200, `${onde}: favicon servido`);
   };
 
   // ---------- Login ----------

@@ -19,12 +19,13 @@ const ID_GRAVACAO = /^[\w-]{1,64}$/;
 const DURACAO_SESSAO_S = 30 * 24 * 60 * 60;
 const MAX_FALHAS_LOGIN = 5;
 const JANELA_FALHAS_MS = 15 * 60 * 1000;
-const ARQUIVO_PUBLICO = /^\/(?:index\.html|css\/[\w-]+\.css|js\/[\w-]+\.js|img\/[\w-]+\.svg|fonts\/[\w-]+\.woff2)$/;
+const ARQUIVO_PUBLICO = /^\/(?:index\.html|css\/[\w-]+\.css|js\/[\w-]+\.js|img\/[\w-]+\.(?:svg|png)|fonts\/[\w-]+\.woff2)$/;
 const TIPOS = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
   '.woff2': 'font/woff2',
 };
 const CABECALHOS_SEGURANCA = {
