@@ -168,8 +168,29 @@
         </div>
         <p class="erro" id="e-progresso" data-erro="progresso"></p>
 
-        <label class="rotulo" for="f-notas">Notas</label>
-        <textarea id="f-notas" name="notas" class="campo" rows="3" maxlength="2000"></textarea>
+        <span class="rotulo" id="rotulo-notas">Notas</span>
+        <div class="editor">
+          <div class="editor-barra" role="toolbar" aria-label="Formatação das notas">
+            <button type="button" class="editor-botao" data-comando="bold" title="Negrito" aria-label="Negrito"><b>B</b></button>
+            <button type="button" class="editor-botao" data-comando="italic" title="Itálico" aria-label="Itálico"><i>I</i></button>
+            <button type="button" class="editor-botao" data-comando="underline" title="Sublinhado" aria-label="Sublinhado"><u>U</u></button>
+            <span class="editor-separador"></span>
+            <button type="button" class="editor-botao" data-comando="insertUnorderedList" title="Lista com marcadores" aria-label="Lista com marcadores"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg></button>
+            <button type="button" class="editor-botao" data-comando="insertOrderedList" title="Lista numerada" aria-label="Lista numerada"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10M4 5h1.5v4M4 9h3M4 14.5c0-.8.7-1.5 1.5-1.5S7 13.7 7 14.5c0 1.2-3 2-3 3.5h3"/></svg></button>
+            <span class="editor-separador"></span>
+            <button type="button" class="editor-botao" data-comando="removeFormat" title="Limpar formatação" aria-label="Limpar formatação"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12M12 5l-3 14M5 19l14-14"/></svg></button>
+          </div>
+          <div id="f-notas" class="editor-area" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="rotulo-notas" aria-describedby="e-notas" data-placeholder="Observações, combinados, links…"></div>
+        </div>
+        <p class="erro" id="e-notas" data-erro="notas"></p>
+
+        <div class="checklist-topo">
+          <span class="rotulo" id="rotulo-checklist">Checklist</span>
+          <span class="dica" id="f-checklist-resumo"></span>
+        </div>
+        <ul id="f-checklist" class="checklist" aria-labelledby="rotulo-checklist"></ul>
+        <button type="button" class="btn btn-pequeno" id="btn-item-checklist"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Adicionar item</button>
+        <p class="erro" id="e-checklist" data-erro="checklist"></p>
       </div>
 
       <footer class="dialogo-rodape">

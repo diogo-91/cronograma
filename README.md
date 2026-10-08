@@ -18,7 +18,9 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 ## O que faz
 
 - **Empresas:** cada empresa tem seu próprio cronograma. O botão *Empresas*, ao lado do nome, lista as empresas para trocar e cria novas; o nome é editado no próprio título; *Arquivo → Excluir esta empresa* remove uma (sempre fica pelo menos uma). Cada aparelho lembra a última empresa aberta.
-- Atividades com nome, fase, responsável, início, término, progresso (%) e notas.
+- Atividades com nome, fase, responsável, início, término, progresso (%), notas e checklist.
+- **Notas com formatação:** negrito, itálico, sublinhado, listas com marcadores e numeradas. Só essas marcações são guardadas (sem atributos), e colar texto de fora entra sem formatação.
+- **Checklist** por atividade: itens marcáveis (Enter cria o próximo, Backspace num item vazio apaga). O contador aparece na lista e no Gantt; o progresso continua manual.
 - Status automático pela data de hoje: *Não iniciada*, *Em andamento*, *Atrasada* (passou do término sem 100%) e *Concluída*.
 - **Gantt** com escala por dia, semana ou mês, linha de hoje, cores por fase e barra de progresso. Clique na barra ou no nome para editar. Em períodos longos a escala engrossa sozinha (dia até ~3 anos, semana até ~20 anos).
 - **Lista** em tabela no computador e em cartões no celular, com duplicar e excluir (com "Desfazer").

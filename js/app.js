@@ -19,9 +19,14 @@
   const NUM_CORES = 8;
   const TAMANHO_MAXIMO_IMPORTACAO = 1.5 * 1024 * 1024;
   const LARGURA_IMPRESSAO = 960;
-  const CAMPOS = ['nome', 'fase', 'responsavel', 'inicio', 'fim', 'progresso', 'notas'];
+  const CAMPOS = ['nome', 'fase', 'responsavel', 'inicio', 'fim', 'progresso'];
+  const TAGS_DAS_NOTAS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'UL', 'OL', 'LI', 'BR', 'DIV', 'P']);
+  const TAGS_DESCARTADAS = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'IFRAME', 'OBJECT', 'NOSCRIPT']);
+  const PARECE_HTML = /<\/?(b|strong|i|em|u|ul|ol|li|br|div|p)\b/i;
   const ICONES = {
     duplicar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
+    remover: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    checklist: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>',
     excluir: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>',
     atividades: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>',
     concluidas: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>',
@@ -67,6 +72,7 @@
   let empresaAtual = null;
   let empresaPreferida = null;
   let nomeAntesDeEditar = '';
+  let checklistEditado = [];
   const gravacoesSemResposta = new Set();
 
   function el(tag, props = {}, ...filhos) {
@@ -486,7 +492,7 @@
       return el('div', { class: 'g-linha', style: { '--cor': corDa(t, cores) } },
         el('button', { type: 'button', class: 'g-nome', title: t.nome, 'data-id': t.id, onclick: () => abrirEditor(t.id) },
           el('span', { class: 'g-nome-texto' }, t.nome),
-          el('span', { class: 'g-nome-datas' }, `${dataCurta(t.inicio)} – ${dataCurta(t.fim)}`)),
+          el('span', { class: 'g-nome-datas' }, `${dataCurta(t.inicio)} – ${dataCurta(t.fim)}${textoChecklist(t)}`)),
         el('div', { class: 'g-trilho' },
           el('button', {
             type: 'button',
@@ -534,7 +540,8 @@
       return el('tr', { style: { '--cor': corDa(t, cores) } },
         el('td', { class: 'c-nome' },
           el('button', { type: 'button', class: 'nome-link', 'data-id': t.id, onclick: () => abrirEditor(t.id) }, el('span', { class: 'ponto' }), el('span', {}, t.nome)),
-          t.notas && el('div', { class: 'notas' }, t.notas)),
+          t.notas && el('div', { class: 'notas' }, C.notasEmTexto(t.notas)),
+          resumoChecklistEl(t)),
         celula('Fase', t.fase, 'c-fase'),
         el('td', { 'data-rotulo': 'Responsável', class: t.responsavel ? 'c-resp' : 'c-resp vazio-celula' },
           t.responsavel
@@ -570,9 +577,13 @@
       fim: C.isoDeDia(C.diaNumero(hoje) + 6),
       progresso: 0,
       notas: '',
+      checklist: [],
     };
     estado.editando = tarefa ? tarefa.id : null;
     for (const campo of CAMPOS) form.elements[campo].value = valores[campo];
+    notasParaEditor(valores.notas || '');
+    checklistEditado = (valores.checklist || []).map((item) => ({ ...item }));
+    renderChecklistEditor();
     atualizarFaixa(valores.progresso);
     $('#dialogo-titulo').textContent = tarefa ? 'Editar atividade' : 'Nova atividade';
     $('#btn-excluir').hidden = !tarefa;
@@ -589,19 +600,122 @@
     faixa.style.setProperty('--v', `${faixa.value}%`);
   }
 
+  function elementoDoCampo(campo) {
+    return form.elements[campo] || document.getElementById(`f-${campo}`);
+  }
+
   function limparErro(campo) {
     const p = form.querySelector(`[data-erro="${campo}"]`);
     if (!p) return;
     p.textContent = '';
-    form.elements[campo].setAttribute('aria-invalid', 'false');
+    elementoDoCampo(campo).setAttribute('aria-invalid', 'false');
   }
 
   function mostrarErros(erros) {
     for (const p of form.querySelectorAll('[data-erro]')) {
       const campo = p.dataset.erro;
       p.textContent = erros[campo] || '';
-      form.elements[campo].setAttribute('aria-invalid', String(Boolean(erros[campo])));
+      elementoDoCampo(campo).setAttribute('aria-invalid', String(Boolean(erros[campo])));
     }
+  }
+
+  function copiarFormatacaoPermitida(origem, destino) {
+    for (const no of origem.childNodes) {
+      if (no.nodeType === Node.TEXT_NODE) {
+        destino.append(no.textContent);
+      } else if (no.nodeType === Node.ELEMENT_NODE && !TAGS_DESCARTADAS.has(no.tagName)) {
+        const alvo = TAGS_DAS_NOTAS.has(no.tagName) ? document.createElement(no.tagName.toLowerCase()) : destino;
+        copiarFormatacaoPermitida(no, alvo);
+        if (alvo !== destino) destino.append(alvo);
+      }
+    }
+  }
+
+  function notasParaEditor(notas) {
+    const area = $('#f-notas');
+    area.replaceChildren();
+    if (PARECE_HTML.test(notas)) {
+      const inerte = document.createElement('template');
+      inerte.innerHTML = notas.replace(/<(\/?[a-z][a-z0-9]*)\b[^>]*>/gi, '<$1>');
+      copiarFormatacaoPermitida(inerte.content, area);
+      return;
+    }
+    notas.split('\n').forEach((linha, i) => {
+      if (i) area.append(document.createElement('br'));
+      area.append(linha);
+    });
+  }
+
+  function notasDoEditor() {
+    const limpo = document.createElement('div');
+    copiarFormatacaoPermitida($('#f-notas'), limpo);
+    return C.notasEmTexto(limpo.innerHTML) ? limpo.innerHTML : '';
+  }
+
+  function textoChecklist(tarefa) {
+    const { feitos, total } = C.resumoChecklist(tarefa.checklist);
+    return total ? ` · ✓ ${feitos}/${total}` : '';
+  }
+
+  function resumoChecklistEl(tarefa) {
+    const { feitos, total } = C.resumoChecklist(tarefa.checklist);
+    if (!total) return null;
+    return el('div', { class: `checklist-resumo${feitos === total ? ' completo' : ''}`, title: 'Itens do checklist concluídos' },
+      icone('checklist'), `${feitos}/${total} itens`);
+  }
+
+  function atualizarResumoChecklist() {
+    const { feitos, total } = C.resumoChecklist(checklistEditado.filter((i) => i.texto.trim()));
+    $('#f-checklist-resumo').textContent = total ? `${feitos} de ${total} concluídos` : '';
+  }
+
+  function renderChecklistEditor(focar) {
+    const lista = $('#f-checklist');
+    lista.replaceChildren(...checklistEditado.map((item, i) => el('li', { class: 'item-checklist' },
+      el('input', {
+        type: 'checkbox',
+        checked: item.feito,
+        'aria-label': `Concluído: item ${i + 1}`,
+        onchange: (ev) => {
+          item.feito = ev.target.checked;
+          atualizarResumoChecklist();
+        },
+      }),
+      el('input', {
+        type: 'text',
+        class: 'campo',
+        value: item.texto,
+        maxlength: '300',
+        placeholder: 'Descreva o item',
+        'aria-label': `Item ${i + 1} do checklist`,
+        oninput: (ev) => {
+          item.texto = ev.target.value;
+          atualizarResumoChecklist();
+        },
+        onkeydown: (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            checklistEditado.splice(i + 1, 0, { texto: '', feito: false });
+            renderChecklistEditor(i + 1);
+          } else if (ev.key === 'Backspace' && !item.texto) {
+            ev.preventDefault();
+            checklistEditado.splice(i, 1);
+            renderChecklistEditor(Math.max(0, i - 1));
+          }
+        },
+      }),
+      el('button', {
+        type: 'button',
+        class: 'btn-icone',
+        title: 'Remover item',
+        'aria-label': `Remover item ${i + 1}`,
+        onclick: () => {
+          checklistEditado.splice(i, 1);
+          renderChecklistEditor(Math.min(i, checklistEditado.length - 1));
+        },
+      }, icone('remover')))));
+    if (focar != null && focar >= 0) lista.querySelectorAll('input[type=text]')[focar]?.focus();
+    atualizarResumoChecklist();
   }
 
   function atualizarDuracao() {
@@ -623,7 +737,7 @@
 
   function salvarEditor(evento) {
     evento.preventDefault();
-    const r = C.validarTarefa(Object.fromEntries(new FormData(form)));
+    const r = C.validarTarefa({ ...Object.fromEntries(new FormData(form)), notas: notasDoEditor(), checklist: checklistEditado });
     if (form.elements.progresso.validity.badInput) r.erros.progresso = 'Digite um número de 0 a 100.';
     mostrarErros(r.erros);
     if (Object.keys(r.erros).length) {
@@ -678,7 +792,13 @@
   function duplicar(id) {
     const original = estado.tarefas.find((t) => t.id === id);
     if (!original) return;
-    const copia = { ...original, id: C.novoId(), nome: `${original.nome} (cópia)`, progresso: 0 };
+    const copia = {
+      ...original,
+      id: C.novoId(),
+      nome: `${original.nome} (cópia)`,
+      progresso: 0,
+      checklist: (original.checklist || []).map((item) => ({ ...item, feito: false })),
+    };
     estado.tarefas.push(copia);
     const gravacao = salvar();
     render();
@@ -722,8 +842,19 @@
       ['Publicação', 'Lançamento', 'Diego', 25, 25, 0],
       ['Divulgação', 'Lançamento', 'Ana', 26, 33, 0],
     ];
+    const detalhes = {
+      Wireframes: {
+        notas: '<b>Referência:</b> manual da marca e site atual.<ul><li>Priorizar a versão para celular</li><li>Validar com o cliente na sexta</li></ul>',
+        checklist: [
+          { texto: 'Página inicial', feito: true },
+          { texto: 'Página de serviços', feito: true },
+          { texto: 'Formulário de contato', feito: false },
+        ],
+      },
+    };
     substituirTudo(estado.titulo, itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
-      id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso, notas: '',
+      id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso,
+      notas: detalhes[nome]?.notas || '', checklist: detalhes[nome]?.checklist || [],
     }))).then((ok) => ok && avisar('Exemplo carregado. Edite ou apague à vontade.'));
   }
 
@@ -905,6 +1036,25 @@
   $('#arquivo').addEventListener('change', importarArquivo);
 
   form.addEventListener('submit', salvarEditor);
+  document.execCommand('styleWithCSS', false, false);
+  for (const botao of document.querySelectorAll('[data-comando]')) {
+    botao.addEventListener('mousedown', (ev) => ev.preventDefault());
+    botao.addEventListener('click', () => {
+      $('#f-notas').focus();
+      document.execCommand(botao.dataset.comando, false, null);
+    });
+  }
+  $('#f-notas').addEventListener('paste', (ev) => {
+    ev.preventDefault();
+    document.execCommand('insertText', false, ev.clipboardData.getData('text/plain'));
+  });
+  $('#f-notas').addEventListener('drop', (ev) => ev.preventDefault());
+  $('#f-notas').addEventListener('input', () => limparErro('notas'));
+  $('#btn-item-checklist').addEventListener('click', () => {
+    checklistEditado.push({ texto: '', feito: false });
+    renderChecklistEditor(checklistEditado.length - 1);
+    limparErro('checklist');
+  });
   form.elements.inicio.addEventListener('change', aoMudarInicio);
   form.elements.fim.addEventListener('change', atualizarDuracao);
   $('#f-progresso-faixa').addEventListener('input', (ev) => {

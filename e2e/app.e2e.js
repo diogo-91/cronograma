@@ -537,6 +537,52 @@ fs.mkdirSync(OUT, { recursive: true });
   await emp.page.click('[data-acao=excluir-empresa]');
   await aguardarAnuncio(emp.page, 'única empresa');
 
+  // notas com formatação e checklist
+  const notas = await nova({ viewport: { width: 1366, height: 860 } });
+  await entrar(notas.page, await novoServidor());
+  await notas.page.click('#btn-nova');
+  await notas.page.fill('#f-nome', 'Com checklist');
+  await notas.page.click('#f-notas');
+  await notas.page.click('[data-comando=bold]');
+  await notas.page.keyboard.type('Importante');
+  await notas.page.click('[data-comando=bold]');
+  await notas.page.keyboard.type(' resto normal');
+  await notas.page.click('#btn-item-checklist');
+  await notas.page.keyboard.type('Comprar cimento');
+  await notas.page.keyboard.press('Enter');
+  await notas.page.keyboard.type('Contratar pedreiro');
+  await notas.page.check('#f-checklist li:first-child input[type=checkbox]');
+  assert.equal(await notas.page.textContent('#f-checklist-resumo'), '1 de 2 concluídos');
+  await notas.page.screenshot({ path: path.join(OUT, '17-notas-checklist.png') });
+  await notas.page.click('#form-tarefa button[type=submit]');
+  await aguardarSalvo(notas.page);
+  await notas.page.reload();
+  await notas.page.waitForSelector('body[data-tela="app"]');
+  assert.match(await notas.page.textContent('.g-nome-datas'), /✓ 1\/2$/);
+  await notas.page.click('.g-nome:has-text("Com checklist")');
+  assert.match(await notas.page.innerHTML('#f-notas'), /^<b>Importante<\/b>(\s|&nbsp;)resto normal$/);
+  assert.deepEqual(await notas.page.$$eval('#f-checklist input[type=text]', (els) => els.map((e) => e.value)), ['Comprar cimento', 'Contratar pedreiro']);
+  assert.deepEqual(await notas.page.$$eval('#f-checklist input[type=checkbox]', (els) => els.map((e) => e.checked)), [true, false]);
+  await notas.page.click('#dialogo [data-fechar].btn');
+  await notas.page.click('[data-visao=tabela]');
+  assert.match(await notas.page.textContent('.tabela .checklist-resumo'), /1\/2 itens/);
+  assert.match(await notas.page.textContent('.tabela .notas'), /^Importante resto normal$/);
+
+  await notas.page.evaluate(async () => {
+    const { empresas } = await (await fetch('api/empresas')).json();
+    const url = `api/empresas/${empresas[0].id}`;
+    const doc = await (await fetch(url)).json();
+    doc.tarefas[0].notas = '<img src=x onerror="window.__xss=1"><script>window.__xss=2</script><b onclick="window.__xss=3" style="color:red">ok</b><a href="javascript:alert(1)">link</a>';
+    await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revisaoBase: doc.revisao, titulo: doc.titulo, tarefas: doc.tarefas }) });
+  });
+  await notas.page.reload();
+  await notas.page.waitForSelector('body[data-tela="app"]');
+  await notas.page.click('.nome-link:has-text("Com checklist")');
+  assert.equal(await notas.page.innerHTML('#f-notas'), '<b>ok</b>link');
+  await notas.page.click('#f-notas b');
+  assert.equal(await notas.page.evaluate(() => window.__xss), undefined, 'nada do HTML injetado executou');
+  await notas.page.click('#dialogo [data-fechar].btn');
+
   // sair volta para a tela de senha
   await page.click('#menu summary');
   await page.click('[data-acao=sair]');
@@ -557,6 +603,7 @@ fs.mkdirSync(OUT, { recursive: true });
     servidor.closeAllConnections();
     servidor.close();
   }
+  if (erros.length) console.error(erros.join('\n'));
   assert.deepEqual(erros, [], 'sem erros no console');
   console.log('E2E OK');
 })().catch((e) => {

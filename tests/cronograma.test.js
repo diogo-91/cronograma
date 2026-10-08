@@ -46,7 +46,7 @@ test('validarTarefa aponta cada campo inválido', () => {
 test('validarTarefa normaliza texto e progresso de uma tarefa válida', () => {
   const r = C.validarTarefa({ nome: '  Fundação ', fase: ' Obra ', responsavel: ' Ana ', inicio: '2026-10-01', fim: '2026-10-05', progresso: '42.6', notas: 'n' });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.tarefa, { nome: 'Fundação', fase: 'Obra', responsavel: 'Ana', inicio: '2026-10-01', fim: '2026-10-05', progresso: 43, notas: 'n' });
+  assert.deepEqual(r.tarefa, { nome: 'Fundação', fase: 'Obra', responsavel: 'Ana', inicio: '2026-10-01', fim: '2026-10-05', progresso: 43, notas: 'n', checklist: [] });
 });
 
 test('ordenarTarefas ordena por início, depois fim, depois nome, sem alterar a entrada', () => {
@@ -140,8 +140,8 @@ test('paraCSV usa ponto e vírgula, datas brasileiras, aspas e neutraliza fórmu
   ], HOJE);
   const linhas = csv.replace(/^﻿/, '').split('\r\n');
   assert.ok(csv.startsWith('﻿'), 'BOM para o Excel reconhecer UTF-8');
-  assert.match(linhas[0], /^Atividade;Fase;Responsável;Início;Fim;Duração \(dias\);Progresso \(%\);Status;Notas$/);
-  assert.equal(linhas[1], '"Compra; ""urgente""";;;01/10/2026;03/10/2026;3;50;Atrasada;');
+  assert.match(linhas[0], /^Atividade;Fase;Responsável;Início;Fim;Duração \(dias\);Progresso \(%\);Status;Notas;Checklist$/);
+  assert.equal(linhas[1], '"Compra; ""urgente""";;;01/10/2026;03/10/2026;3;50;Atrasada;;');
   assert.ok(linhas[2].startsWith('"\'=HYPERLINK(""x"")"'));
 });
 
@@ -222,4 +222,50 @@ test('iniciais usa a primeira letra do primeiro e do último nome', () => {
   assert.equal(C.iniciais('Bruno'), 'B');
   assert.equal(C.iniciais('élida'), 'É');
   assert.equal(C.iniciais(''), '');
+});
+
+test('validarTarefa normaliza o checklist e descarta itens vazios', () => {
+  const r = C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE, checklist: [
+    { texto: '  Comprar cimento ', feito: true },
+    { texto: '   ', feito: false },
+    { texto: 'Contratar pedreiro', feito: 'sim' },
+    'lixo',
+  ] });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.tarefa.checklist, [{ texto: 'Comprar cimento', feito: true }, { texto: 'Contratar pedreiro', feito: false }]);
+  assert.deepEqual(C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE }).tarefa.checklist, []);
+});
+
+test('validarTarefa limita checklist e notas', () => {
+  const muitos = Array.from({ length: 201 }, (_, i) => ({ texto: `item ${i}`, feito: false }));
+  assert.ok(C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE, checklist: muitos }).erros.checklist);
+  assert.ok(C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE, notas: 'x'.repeat(20001) }).erros.notas);
+});
+
+test('notasEmTexto tira a formatação e mantém quebras e marcadores', () => {
+  assert.equal(C.notasEmTexto('<b>Atenção</b>: <i>urgente</i><ul><li>um</li><li>dois &amp; três</li></ul>fim'), 'Atenção: urgente\n• um\n• dois & três\nfim');
+  assert.equal(C.notasEmTexto('linha 1<br>linha 2<div>linha 3</div>'), 'linha 1\nlinha 2\nlinha 3');
+  assert.equal(C.notasEmTexto('a < b e c > d'), 'a < b e c > d');
+  assert.equal(C.notasEmTexto(''), '');
+});
+
+test('busca encontra texto das notas formatadas e do checklist, não as marcações', () => {
+  const lista = [
+    tarefa({ id: '1', notas: '<b>reunião</b> com cliente' }),
+    tarefa({ id: '2', checklist: [{ texto: 'Pintar fachada', feito: false }] }),
+  ];
+  assert.deepEqual(C.filtrarTarefas(lista, { texto: 'reuniao com' }, HOJE).map((t) => t.id), ['1']);
+  assert.deepEqual(C.filtrarTarefas(lista, { texto: 'fachada' }, HOJE).map((t) => t.id), ['2']);
+  assert.deepEqual(C.filtrarTarefas(lista, { texto: '<b>' }, HOJE).map((t) => t.id), []);
+});
+
+test('resumoChecklist conta itens feitos', () => {
+  assert.deepEqual(C.resumoChecklist([{ texto: 'a', feito: true }, { texto: 'b', feito: false }]), { feitos: 1, total: 2 });
+  assert.deepEqual(C.resumoChecklist(undefined), { feitos: 0, total: 0 });
+});
+
+test('paraCSV exporta notas sem marcações e o checklist legível', () => {
+  const csv = C.paraCSV([tarefa({ nome: 'A', notas: '<b>Olá</b>', checklist: [{ texto: 'um', feito: true }, { texto: 'dois', feito: false }] })], HOJE);
+  const linha = csv.replace(/^﻿/, '').split('\r\n')[1];
+  assert.ok(linha.endsWith(';Olá;[x] um | [ ] dois'), linha);
 });

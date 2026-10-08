@@ -748,6 +748,31 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
 .progresso-numero { display: flex; align-items: center; gap: 6px; color: var(--texto-suave); }
 .progresso-numero .campo { width: 80px; text-align: right; color: var(--texto); }
 
+.editor { border: 1px solid var(--borda); border-radius: var(--raio-sm); background: var(--superficie); box-shadow: var(--sombra-1); overflow: hidden; transition: border-color 0.15s, box-shadow 0.15s; }
+.editor:focus-within { border-color: var(--ouro); box-shadow: 0 0 0 4px var(--foco); }
+.editor-barra { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; background: var(--superficie-3); border-bottom: 1px solid var(--borda); }
+.editor-botao { display: inline-grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: var(--texto); font-size: 0.95rem; cursor: pointer; }
+.editor-botao:hover { background: var(--superficie-2); }
+.editor-separador { width: 1px; margin: 6px 4px; background: var(--borda); }
+.editor-area { min-height: 96px; max-height: 260px; overflow-y: auto; padding: 10px 12px; line-height: 1.5; outline: none; overflow-wrap: anywhere; }
+.editor-area:empty::before { content: attr(data-placeholder); color: #9a99a1; }
+.editor-area ul, .editor-area ol { margin: 4px 0; padding-left: 22px; }
+.editor[aria-invalid="true"], .editor:has([aria-invalid="true"]) { border-color: var(--perigo); }
+
+.checklist-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.checklist-topo .dica { margin: 0; }
+.checklist { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.checklist:empty { display: none; }
+.item-checklist { display: flex; align-items: center; gap: 8px; }
+.item-checklist input[type="checkbox"] { flex: none; width: 20px; height: 20px; accent-color: var(--ouro); cursor: pointer; }
+.item-checklist .campo { min-height: 36px; padding: 6px 10px; }
+.item-checklist input[type="checkbox"]:checked + .campo { color: var(--texto-suave); text-decoration: line-through; }
+.btn-pequeno { min-height: 34px; padding: 4px 12px; font-size: 0.85rem; }
+.btn-pequeno svg { width: 16px; height: 16px; }
+.checklist-resumo { display: inline-flex; align-items: center; gap: 4px; margin: 2px 0 0 20px; font-size: 0.78rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.checklist-resumo svg { width: 14px; height: 14px; }
+.checklist-resumo.completo { color: var(--st-concluida); }
+
 /* Aviso */
 
 .toast {
@@ -874,6 +899,7 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
   .tabela .c-nome .nome-link { font-size: 1rem; }
   .tabela .c-nome .ponto { display: none; }
   .tabela .notas { margin-left: 0; max-width: none; white-space: normal; }
+  .tabela .checklist-resumo { margin-left: 0; }
   .tabela .avatar { width: 22px; height: 22px; font-size: 0.62rem; }
   .tabela .vazio-celula { display: none; }
 

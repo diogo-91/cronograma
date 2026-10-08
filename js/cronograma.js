@@ -5,6 +5,9 @@ const Cronograma = (() => {
   const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
   const PX_POR_DIA = { dia: 36, semana: 14, mes: 5 };
   const FOLGA_DIAS = { dia: 2, semana: 7, mes: 15 };
+  const MAX_NOTAS = 20000;
+  const MAX_ITENS_CHECKLIST = 200;
+  const MAX_TEXTO_ITEM = 300;
   const MAX_DIAS_ZOOM = { dia: 1100, semana: 7300 };
   const ANO_MINIMO = 1900;
   const ANO_MAXIMO = 2199;
@@ -58,6 +61,25 @@ const Cronograma = (() => {
     return 'pendente';
   }
 
+  const ENTIDADES = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' };
+
+  function notasEmTexto(notas) {
+    if (!notas) return '';
+    return notas
+      .replace(/<li\b[^>]*>/gi, '\n• ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<(p|div)\b[^>]*>/gi, '\n')
+      .replace(/<\/(p|div|li|ul|ol)>/gi, '\n')
+      .replace(/<\/?(b|strong|i|em|u|ul|ol|span)\b[^>]*>/gi, '')
+      .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_, nome) => ENTIDADES[nome])
+      .replace(/\n{2,}/g, '\n')
+      .trim();
+  }
+
+  function resumoChecklist(itens = []) {
+    return { feitos: itens.filter((i) => i.feito).length, total: itens.length };
+  }
+
   function texto(valor) {
     return valor == null ? '' : String(valor).trim();
   }
@@ -71,8 +93,14 @@ const Cronograma = (() => {
       fim: texto(dados.fim),
       progresso: dados.progresso === '' || dados.progresso == null ? 0 : Number(dados.progresso),
       notas: texto(dados.notas),
+      checklist: (Array.isArray(dados.checklist) ? dados.checklist : [])
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => ({ texto: texto(item.texto).slice(0, MAX_TEXTO_ITEM), feito: item.feito === true }))
+        .filter((item) => item.texto),
     };
     const erros = {};
+    if (tarefa.notas.length > MAX_NOTAS) erros.notas = 'As notas estão longas demais.';
+    if (tarefa.checklist.length > MAX_ITENS_CHECKLIST) erros.checklist = `O checklist pode ter até ${MAX_ITENS_CHECKLIST} itens.`;
     if (!tarefa.nome) erros.nome = 'Informe o nome da atividade.';
     const inicio = diaNumero(tarefa.inicio);
     const fim = diaNumero(tarefa.fim);
@@ -107,7 +135,7 @@ const Cronograma = (() => {
       (t) =>
         (!fase || t.fase === fase) &&
         (!status || statusTarefa(t, hoje) === status) &&
-        (!termo || normalizar([t.nome, t.fase, t.responsavel, t.notas].join(' ')).includes(termo)),
+        (!termo || normalizar([t.nome, t.fase, t.responsavel, notasEmTexto(t.notas), ...(t.checklist || []).map((i) => i.texto)].join(' ')).includes(termo)),
     );
   }
 
@@ -205,7 +233,7 @@ const Cronograma = (() => {
   }
 
   function paraCSV(tarefas, hoje) {
-    const cabecalho = ['Atividade', 'Fase', 'Responsável', 'Início', 'Fim', 'Duração (dias)', 'Progresso (%)', 'Status', 'Notas'];
+    const cabecalho = ['Atividade', 'Fase', 'Responsável', 'Início', 'Fim', 'Duração (dias)', 'Progresso (%)', 'Status', 'Notas', 'Checklist'];
     const linhas = tarefas.map((t) => [
       t.nome,
       t.fase,
@@ -215,7 +243,8 @@ const Cronograma = (() => {
       duracaoDias(t),
       t.progresso,
       ROTULO_STATUS[statusTarefa(t, hoje)],
-      t.notas,
+      notasEmTexto(t.notas),
+      (t.checklist || []).map((i) => `[${i.feito ? 'x' : ' '}] ${i.texto}`).join(' | '),
     ]);
     return '﻿' + [cabecalho, ...linhas].map((l) => l.map(campoCSV).join(';')).join('\r\n');
   }
@@ -278,6 +307,8 @@ const Cronograma = (() => {
     importarDados,
     indicesDeCor,
     iniciais,
+    notasEmTexto,
+    resumoChecklist,
   };
 })();
 
