@@ -97,7 +97,10 @@ const Cronograma = (() => {
         .filter((item) => item && typeof item === 'object')
         .map((item) => ({ texto: texto(item.texto).slice(0, MAX_TEXTO_ITEM), feito: item.feito === true }))
         .filter((item) => item.texto),
+      tipo: dados.tipo === 'marco' ? 'marco' : 'tarefa',
+      ordem: Number.isFinite(dados.ordem) ? dados.ordem : null,
     };
+    if (tarefa.tipo === 'marco') tarefa.fim = tarefa.inicio;
     const erros = {};
     if (tarefa.notas.length > MAX_NOTAS) erros.notas = 'As notas estão longas demais.';
     if (tarefa.checklist.length > MAX_ITENS_CHECKLIST) erros.checklist = `O checklist pode ter até ${MAX_ITENS_CHECKLIST} itens.`;
@@ -119,10 +122,62 @@ const Cronograma = (() => {
     return a < b ? -1 : a > b ? 1 : 0;
   }
 
+  function compararPorData(a, b) {
+    return comparar(a.inicio, b.inicio) || comparar(a.fim, b.fim) || a.nome.localeCompare(b.nome, 'pt-BR');
+  }
+
   function ordenarTarefas(tarefas) {
+    const temOrdem = (t) => Number.isFinite(t.ordem);
     return [...tarefas].sort(
-      (a, b) => comparar(a.inicio, b.inicio) || comparar(a.fim, b.fim) || a.nome.localeCompare(b.nome, 'pt-BR'),
+      (a, b) => temOrdem(b) - temOrdem(a) || (temOrdem(a) ? a.ordem - b.ordem : 0) || compararPorData(a, b),
     );
+  }
+
+  function ordenarPorData(tarefas) {
+    return [...tarefas].sort(compararPorData).map((t, i) => ({ ...t, ordem: i }));
+  }
+
+  function agruparPorFase(tarefas, hoje) {
+    const porFase = new Map();
+    for (const t of ordenarTarefas(tarefas)) {
+      if (!porFase.has(t.fase)) porFase.set(t.fase, []);
+      porFase.get(t.fase).push(t);
+    }
+    return [...porFase].map(([fase, lista]) => {
+      const r = resumo(lista, hoje);
+      return { fase, tarefas: lista, inicio: r.inicio, fim: r.fim, progresso: r.progressoGeral, total: r.total, concluidas: r.concluidas, atrasadas: r.atrasadas };
+    });
+  }
+
+  function achatar(grupos) {
+    return grupos.flatMap((g) => g.tarefas).map((t, i) => ({ ...t, ordem: i }));
+  }
+
+  function moverTarefa(tarefas, id, fase, antesDeId) {
+    const item = tarefas.find((t) => t.id === id);
+    if (!item) return tarefas;
+    const ordemDasFases = agruparPorFase(tarefas).map((g) => g.fase);
+    const grupos = agruparPorFase(tarefas.filter((t) => t.id !== id)).map((g) => ({ fase: g.fase, tarefas: [...g.tarefas] }));
+    let grupo = grupos.find((g) => g.fase === fase);
+    if (!grupo) {
+      grupo = { fase, tarefas: [] };
+      const original = ordemDasFases.indexOf(fase);
+      const posicao = original < 0 ? grupos.length : grupos.filter((g) => ordemDasFases.indexOf(g.fase) < original).length;
+      grupos.splice(posicao, 0, grupo);
+    }
+    const posicao = antesDeId ? grupo.tarefas.findIndex((t) => t.id === antesDeId) : -1;
+    grupo.tarefas.splice(posicao < 0 ? grupo.tarefas.length : posicao, 0, { ...item, fase });
+    return achatar(grupos);
+  }
+
+  function moverFase(tarefas, fase, antesDeFase) {
+    const grupos = agruparPorFase(tarefas);
+    const indice = grupos.findIndex((g) => g.fase === fase);
+    if (indice < 0) return tarefas;
+    const [grupo] = grupos.splice(indice, 1);
+    const posicao = antesDeFase === null ? -1 : grupos.findIndex((g) => g.fase === antesDeFase);
+    grupos.splice(posicao < 0 ? grupos.length : posicao, 0, grupo);
+    return achatar(grupos);
   }
 
   function normalizar(valor) {
@@ -233,7 +288,7 @@ const Cronograma = (() => {
   }
 
   function paraCSV(tarefas, hoje) {
-    const cabecalho = ['Atividade', 'Fase', 'Responsável', 'Início', 'Fim', 'Duração (dias)', 'Progresso (%)', 'Status', 'Notas', 'Checklist'];
+    const cabecalho = ['Atividade', 'Fase', 'Responsável', 'Início', 'Fim', 'Duração (dias)', 'Progresso (%)', 'Status', 'Notas', 'Checklist', 'Tipo'];
     const linhas = tarefas.map((t) => [
       t.nome,
       t.fase,
@@ -245,6 +300,7 @@ const Cronograma = (() => {
       ROTULO_STATUS[statusTarefa(t, hoje)],
       notasEmTexto(t.notas),
       (t.checklist || []).map((i) => `[${i.feito ? 'x' : ' '}] ${i.texto}`).join(' | '),
+      t.tipo === 'marco' ? 'Marco' : 'Atividade',
     ]);
     return '﻿' + [cabecalho, ...linhas].map((l) => l.map(campoCSV).join(';')).join('\r\n');
   }
@@ -298,6 +354,10 @@ const Cronograma = (() => {
     statusTarefa,
     validarTarefa,
     ordenarTarefas,
+    ordenarPorData,
+    agruparPorFase,
+    moverTarefa,
+    moverFase,
     filtrarTarefas,
     resumo,
     zoomEfetivo,

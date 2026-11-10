@@ -46,7 +46,7 @@ test('validarTarefa aponta cada campo inválido', () => {
 test('validarTarefa normaliza texto e progresso de uma tarefa válida', () => {
   const r = C.validarTarefa({ nome: '  Fundação ', fase: ' Obra ', responsavel: ' Ana ', inicio: '2026-10-01', fim: '2026-10-05', progresso: '42.6', notas: 'n' });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.tarefa, { nome: 'Fundação', fase: 'Obra', responsavel: 'Ana', inicio: '2026-10-01', fim: '2026-10-05', progresso: 43, notas: 'n', checklist: [] });
+  assert.deepEqual(r.tarefa, { nome: 'Fundação', fase: 'Obra', responsavel: 'Ana', inicio: '2026-10-01', fim: '2026-10-05', progresso: 43, notas: 'n', checklist: [], tipo: 'tarefa', ordem: null });
 });
 
 test('ordenarTarefas ordena por início, depois fim, depois nome, sem alterar a entrada', () => {
@@ -140,8 +140,8 @@ test('paraCSV usa ponto e vírgula, datas brasileiras, aspas e neutraliza fórmu
   ], HOJE);
   const linhas = csv.replace(/^﻿/, '').split('\r\n');
   assert.ok(csv.startsWith('﻿'), 'BOM para o Excel reconhecer UTF-8');
-  assert.match(linhas[0], /^Atividade;Fase;Responsável;Início;Fim;Duração \(dias\);Progresso \(%\);Status;Notas;Checklist$/);
-  assert.equal(linhas[1], '"Compra; ""urgente""";;;01/10/2026;03/10/2026;3;50;Atrasada;;');
+  assert.match(linhas[0], /^Atividade;Fase;Responsável;Início;Fim;Duração \(dias\);Progresso \(%\);Status;Notas;Checklist;Tipo$/);
+  assert.equal(linhas[1], '"Compra; ""urgente""";;;01/10/2026;03/10/2026;3;50;Atrasada;;;Atividade');
   assert.ok(linhas[2].startsWith('"\'=HYPERLINK(""x"")"'));
 });
 
@@ -267,5 +267,76 @@ test('resumoChecklist conta itens feitos', () => {
 test('paraCSV exporta notas sem marcações e o checklist legível', () => {
   const csv = C.paraCSV([tarefa({ nome: 'A', notas: '<b>Olá</b>', checklist: [{ texto: 'um', feito: true }, { texto: 'dois', feito: false }] })], HOJE);
   const linha = csv.replace(/^﻿/, '').split('\r\n')[1];
-  assert.ok(linha.endsWith(';Olá;[x] um | [ ] dois'), linha);
+  assert.ok(linha.endsWith(';Olá;[x] um | [ ] dois;Atividade'), linha);
+});
+
+test('validarTarefa aceita marco e força o término igual ao início', () => {
+  const r = C.validarTarefa({ nome: 'Entrega', tipo: 'marco', inicio: '2026-10-10', fim: '2026-10-20' });
+  assert.equal(r.ok, true);
+  assert.equal(r.tarefa.tipo, 'marco');
+  assert.equal(r.tarefa.fim, '2026-10-10');
+  assert.equal(C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE, tipo: 'qualquer' }).tarefa.tipo, 'tarefa');
+  assert.equal(C.validarTarefa({ nome: 'A', inicio: HOJE, fim: '', tipo: 'marco' }).tarefa.fim, HOJE);
+});
+
+test('validarTarefa guarda a ordem manual quando é número', () => {
+  assert.equal(C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE, ordem: 3 }).tarefa.ordem, 3);
+  assert.equal(C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE, ordem: 'x' }).tarefa.ordem, null);
+});
+
+test('ordenarTarefas respeita a ordem manual e põe as sem ordem depois, por data', () => {
+  const lista = [
+    tarefa({ id: 'a', inicio: '2026-10-01', ordem: 2 }),
+    tarefa({ id: 'b', inicio: '2026-10-05', ordem: 0 }),
+    tarefa({ id: 'c', inicio: '2026-09-01' }),
+    tarefa({ id: 'd', inicio: '2026-10-03', ordem: 1 }),
+  ];
+  assert.deepEqual(C.ordenarTarefas(lista).map((t) => t.id), ['b', 'd', 'a', 'c']);
+});
+
+const comFases = () => [
+  tarefa({ id: 'p1', fase: 'Projeto', inicio: '2026-10-01', fim: '2026-10-04', progresso: 100, ordem: 0 }),
+  tarefa({ id: 'o1', fase: 'Obra', inicio: '2026-10-05', fim: '2026-10-14', progresso: 0, ordem: 1 }),
+  tarefa({ id: 'p2', fase: 'Projeto', inicio: '2026-10-03', fim: '2026-10-06', progresso: 50, ordem: 2 }),
+  tarefa({ id: 's1', fase: '', inicio: '2026-10-20', fim: '2026-10-20', ordem: 3 }),
+];
+
+test('agruparPorFase junta por fase na ordem da primeira atividade e resume cada grupo', () => {
+  const grupos = C.agruparPorFase(comFases(), HOJE);
+  assert.deepEqual(grupos.map((g) => [g.fase, g.tarefas.map((t) => t.id)]), [['Projeto', ['p1', 'p2']], ['Obra', ['o1']], ['', ['s1']]]);
+  const projeto = grupos[0];
+  assert.equal(projeto.inicio, '2026-10-01');
+  assert.equal(projeto.fim, '2026-10-06');
+  assert.equal(projeto.progresso, 75);
+  assert.equal(projeto.total, 2);
+});
+
+test('moverTarefa reordena dentro do grupo e renumera a ordem', () => {
+  const r = C.moverTarefa(comFases(), 'p2', 'Projeto', 'p1');
+  assert.deepEqual(C.agruparPorFase(r, HOJE)[0].tarefas.map((t) => t.id), ['p2', 'p1']);
+  assert.deepEqual(C.ordenarTarefas(r).map((t) => t.ordem), [0, 1, 2, 3]);
+});
+
+test('moverTarefa para outro grupo muda a fase; sem referência vai para o fim do grupo', () => {
+  const r = C.moverTarefa(comFases(), 'p1', 'Obra', null);
+  const obra = C.agruparPorFase(r, HOJE).find((g) => g.fase === 'Obra');
+  assert.deepEqual(obra.tarefas.map((t) => t.id), ['o1', 'p1']);
+  assert.equal(r.find((t) => t.id === 'p1').fase, 'Obra');
+});
+
+test('moverFase leva o grupo inteiro para antes de outro, ou para o fim', () => {
+  const antes = C.moverFase(comFases(), 'Obra', 'Projeto');
+  assert.deepEqual(C.agruparPorFase(antes, HOJE).map((g) => g.fase), ['Obra', 'Projeto', '']);
+  const fim = C.moverFase(comFases(), 'Projeto', null);
+  assert.deepEqual(C.agruparPorFase(fim, HOJE).map((g) => g.fase), ['Obra', '', 'Projeto']);
+});
+
+test('ordenarPorData refaz a ordem manual pela data de início', () => {
+  const r = C.ordenarPorData(comFases());
+  assert.deepEqual(C.ordenarTarefas(r).map((t) => t.id), ['p1', 'p2', 'o1', 's1']);
+});
+
+test('moverTarefa da única atividade do grupo para o próprio grupo não muda a posição do grupo', () => {
+  const r = C.moverTarefa(comFases(), 'o1', 'Obra', null);
+  assert.deepEqual(C.agruparPorFase(r, HOJE).map((g) => g.fase), ['Projeto', 'Obra', '']);
 });

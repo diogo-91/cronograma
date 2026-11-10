@@ -10,7 +10,7 @@ const OUT = path.join(__dirname, 'saida');
 fs.mkdirSync(OUT, { recursive: true });
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const servidores = [];
   const erros = [];
   const novoServidor = async () => {
@@ -74,7 +74,8 @@ fs.mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: path.join(OUT, '01-vazio-desktop.png') });
 
   await page.click('text=Ver um exemplo');
-  assert.equal(await page.locator('.g-barra').count(), 10, '10 barras no exemplo');
+  assert.equal(await page.locator('.g-barra').count(), 9, '9 barras no exemplo');
+  assert.equal(await page.locator('.g-marco').count(), 1, '1 marco no exemplo');
   assert.ok(await page.isVisible('.g-hoje'), 'linha de hoje');
   await page.screenshot({ path: path.join(OUT, '02-gantt-semana-desktop.png') });
 
@@ -107,7 +108,7 @@ fs.mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: path.join(OUT, '03-dialogo-desktop.png') });
   await page.click('#form-tarefa button[type=submit]');
   assert.equal(await page.isVisible('#dialogo'), false, 'diálogo fechou');
-  assert.equal(await page.locator('.g-barra').count(), 11);
+  assert.equal(await page.locator('.g-barra').count(), 10);
 
   // editar via barra
   await page.click('.g-barra[aria-label^="Reunião de kickoff"]');
@@ -132,11 +133,11 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.deepEqual(atrasadas, ['Aprovação do conteúdo']);
   await page.selectOption('#filtro-status', '');
   await page.fill('#busca', 'DIEGO');
-  assert.deepEqual((await page.locator('.g-nome-texto').allTextContents()).sort(), ['Back-end e integrações', 'Publicação']);
+  assert.deepEqual((await page.locator('.g-nome-texto').allTextContents()).sort(), ['Back-end e integrações', 'Publicação no ar']);
   await page.fill('#busca', 'zzzz');
   assert.ok(await page.isVisible('text=Nenhuma atividade encontrada'));
   await page.click('text=Limpar filtros');
-  assert.equal(await page.locator('.g-barra').count(), 11);
+  assert.equal(await page.locator('.g-barra').count(), 10);
   await page.selectOption('#filtro-fase', 'Design');
   assert.equal(await page.locator('.g-barra').count(), 3);
   assert.match(await page.textContent('#resumo'), /Progresso \(filtrado\)/);
@@ -144,13 +145,13 @@ fs.mkdirSync(OUT, { recursive: true });
 
   // lista + excluir + desfazer + duplicar
   await page.click('[data-visao=tabela]');
-  assert.equal(await page.locator('.tabela tbody tr').count(), 11);
+  assert.equal(await page.locator('.tabela tbody tr.linha-tarefa').count(), 11);
   assert.equal(await page.isVisible('#grupo-zoom'), false, 'zoom some na lista');
   await page.screenshot({ path: path.join(OUT, '06-lista-desktop.png'), fullPage: true });
   await page.click('[aria-label="Excluir Wireframes"]');
-  assert.equal(await page.locator('.tabela tbody tr').count(), 10);
+  assert.equal(await page.locator('.tabela tbody tr.linha-tarefa').count(), 10);
   await page.click('#toast button:has-text("Desfazer")');
-  assert.equal(await page.locator('.tabela tbody tr').count(), 11);
+  assert.equal(await page.locator('.tabela tbody tr.linha-tarefa').count(), 11);
   await aguardarSalvo(page);
   await page.click('[aria-label="Duplicar Wireframes"]');
   assert.ok(await page.isVisible('text=Wireframes (cópia)'));
@@ -165,12 +166,12 @@ fs.mkdirSync(OUT, { recursive: true });
   await page.reload();
   await page.waitForSelector('body[data-tela="app"]');
   assert.equal(await page.inputValue('#titulo'), 'Obra da casa');
-  assert.equal(await page.locator('.tabela tbody tr').count(), 12, 'persistiu após reload');
+  assert.equal(await page.locator('.tabela tbody tr.linha-tarefa').count(), 12, 'persistiu após reload');
   assert.equal(await page.getAttribute('[data-visao=tabela]', 'aria-pressed'), 'true', 'preferência de visão persistiu');
   const celular = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   await entrar(celular.page, URL_A);
   assert.equal(await celular.page.inputValue('#titulo'), 'Obra da casa', 'outro aparelho vê o mesmo título');
-  assert.equal(await celular.page.locator('.g-barra').count(), 12, 'outro aparelho vê as mesmas atividades');
+  assert.equal(await celular.page.locator('.g-barra').count(), 11, 'outro aparelho vê as mesmas atividades');
 
   // exportar CSV
   await page.click('#menu summary');
@@ -188,8 +189,8 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.ok(await page.isVisible('text=Seu cronograma está vazio'));
   await aguardarSalvo(page);
   await page.setInputFiles('#arquivo', jsonPath);
-  await page.waitForSelector('.tabela tbody tr');
-  assert.equal(await page.locator('.tabela tbody tr').count(), 12, 'reimportou');
+  await page.waitForSelector('.tabela tbody tr.linha-tarefa');
+  assert.equal(await page.locator('.tabela tbody tr.linha-tarefa').count(), 12, 'reimportou');
   assert.equal(await page.inputValue('#titulo'), 'Obra da casa');
   await aguardarAnuncio(page, '12 atividades importadas.');
   // importar inválido
@@ -197,7 +198,7 @@ fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(ruim, JSON.stringify({ tarefas: [{ nome: '', inicio: 'x', fim: 'y' }] }));
   await page.setInputFiles('#arquivo', ruim);
   await aguardarAnuncio(page, 'Importação cancelada. Tarefa 1');
-  assert.equal(await page.locator('.tabela tbody tr').count(), 12, 'importação inválida não apagou nada');
+  assert.equal(await page.locator('.tabela tbody tr.linha-tarefa').count(), 12, 'importação inválida não apagou nada');
 
   // XSS: nome com HTML não vira markup
   await page.click('#btn-nova');
@@ -582,6 +583,93 @@ fs.mkdirSync(OUT, { recursive: true });
   await notas.page.click('#f-notas b');
   assert.equal(await notas.page.evaluate(() => window.__xss), undefined, 'nada do HTML injetado executou');
   await notas.page.click('#dialogo [data-fechar].btn');
+
+  // etapa 1: marcos, fases como grupos, ordem manual
+  const URL_GRUPOS = await novoServidor();
+  const gr = await nova({ viewport: { width: 1366, height: 1400 } });
+  await entrar(gr.page, URL_GRUPOS);
+  await gr.page.click('text=Ver um exemplo');
+  await aguardarSalvo(gr.page);
+  const fasesNaTela = (pg) => pg.locator('.g-grupo-nome').allTextContents();
+  const nomesNaTela = (pg) => pg.locator('.g-nome-texto').allTextContents();
+  assert.deepEqual(await fasesNaTela(gr.page), ['Planejamento', 'Design', 'Desenvolvimento', 'Testes', 'Lançamento']);
+  assert.equal(await gr.page.locator('.g-resumo').count(), 5, 'barra-resumo por fase');
+  await gr.page.screenshot({ path: path.join(OUT, '18-gantt-grupos.png') });
+
+  // marco pelo editor
+  await gr.page.click('#btn-nova');
+  await gr.page.fill('#f-nome', 'Aprovação do cliente');
+  await gr.page.fill('#f-fase', 'Lançamento');
+  await gr.page.check('#f-marco');
+  assert.equal(await gr.page.isVisible('#f-fim'), false, 'marco não tem término');
+  assert.equal(await gr.page.isVisible('#f-progresso'), false, 'marco não tem progresso em %');
+  assert.equal(await gr.page.textContent('#rotulo-inicio'), 'Data *');
+  await gr.page.check('#f-marco-feito');
+  await gr.page.click('#form-tarefa button[type=submit]');
+  await aguardarSalvo(gr.page);
+  assert.equal(await gr.page.locator('.g-marco').count(), 2);
+  assert.match(await gr.page.getAttribute('.g-marco[aria-label^="Marco Aprovação do cliente"]', 'class'), /concluida/);
+  assert.deepEqual((await nomesNaTela(gr.page)).slice(-3), ['Publicação no ar', 'Divulgação', 'Aprovação do cliente'], 'nova atividade vai para o fim da fase');
+
+  // recolher e lembrar
+  await gr.page.click('[aria-label="Recolher Design"]');
+  assert.ok(!(await nomesNaTela(gr.page)).includes('Wireframes'), 'Design recolhido');
+  await gr.page.reload();
+  await gr.page.waitForSelector('body[data-tela="app"]');
+  assert.ok(!(await nomesNaTela(gr.page)).includes('Wireframes'), 'recolhimento lembrado');
+  await gr.page.click('[aria-label="Expandir Design"]');
+  assert.ok((await nomesNaTela(gr.page)).includes('Wireframes'));
+
+  // teclado: subir uma atividade e um grupo
+  await gr.page.focus('.alca[data-alca="tarefa"][aria-label*="Identidade visual"]');
+  await gr.page.keyboard.press('ArrowUp');
+  await gr.page.keyboard.press('ArrowUp');
+  const design = async () => {
+    const nomes = await nomesNaTela(gr.page);
+    return nomes.slice(nomes.indexOf('Identidade visual') - 1, nomes.indexOf('Identidade visual') + 2);
+  };
+  assert.deepEqual(await design(), ['Cronograma e orçamento', 'Identidade visual', 'Wireframes']);
+  assert.equal(await gr.page.evaluate(() => document.activeElement.dataset.valor) !== undefined, true, 'foco continua na alça');
+  await gr.page.focus('.alca[data-alca="fase"][aria-label*="Testes"]');
+  await gr.page.keyboard.press('ArrowUp');
+  assert.deepEqual(await fasesNaTela(gr.page), ['Planejamento', 'Design', 'Testes', 'Desenvolvimento', 'Lançamento']);
+
+  // arrastar com o mouse: atividade para outra fase e grupo inteiro
+  const arrastar = async (pg, alcaSel, alvoSel, posicao = 'cima') => {
+    const a = await pg.locator(alcaSel).boundingBox();
+    const b = await pg.locator(alvoSel).boundingBox();
+    const y = posicao === 'cima' ? b.y + 4 : b.y + b.height - 4;
+    await pg.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await pg.mouse.down();
+    for (let i = 1; i <= 8; i++) await pg.mouse.move(a.x + a.width / 2, a.y + a.height / 2 + ((y - a.y - a.height / 2) * i) / 8);
+    await pg.mouse.up();
+  };
+  await arrastar(gr.page, '.alca[data-alca="tarefa"][aria-label*="Front-end"]', '.g-linha[data-arrastavel="tarefa"]:has(.g-nome-texto:text-is("Testes e ajustes"))');
+  await aguardarSalvo(gr.page);
+  const testes = await gr.page.evaluate(() => [...document.querySelectorAll('.g-linha')].map((l) => l.querySelector('.g-grupo-nome, .g-nome-texto').textContent));
+  const iTestes = testes.indexOf('Testes');
+  assert.deepEqual(testes.slice(iTestes, iTestes + 3), ['Testes', 'Front-end', 'Testes e ajustes'], 'Front-end foi para a fase Testes: ' + testes.join(' / '));
+  await arrastar(gr.page, '.alca[data-alca="fase"][aria-label*="Lançamento"]', '.g-grupo[data-fase="Planejamento"]');
+  await aguardarSalvo(gr.page);
+  assert.equal((await fasesNaTela(gr.page))[0], 'Lançamento', 'grupo inteiro arrastado para o topo');
+
+  // a ordem é do servidor: outro aparelho vê igual
+  const gr2 = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  await entrar(gr2.page, URL_GRUPOS);
+  assert.deepEqual(await fasesNaTela(gr2.page), await fasesNaTela(gr.page));
+  assert.deepEqual(await nomesNaTela(gr2.page), await nomesNaTela(gr.page));
+  await gr2.page.screenshot({ path: path.join(OUT, '19-gantt-grupos-celular.png') });
+  await gr2.page.click('[data-visao=tabela]');
+  await gr2.page.screenshot({ path: path.join(OUT, '20-lista-grupos-celular.png'), fullPage: true });
+
+  // com filtro não dá para arrastar; ordenar por data desfaz a ordem manual
+  await gr.page.fill('#busca', 'a');
+  assert.equal(await gr.page.locator('.alca').count(), 0, 'alças escondidas com filtro');
+  await gr.page.fill('#busca', '');
+  await gr.page.click('#menu summary');
+  await gr.page.click('[data-acao=ordenar-data]');
+  await aguardarSalvo(gr.page);
+  assert.equal((await fasesNaTela(gr.page))[0], 'Planejamento', 'ordem por data volta Planejamento ao topo');
 
   // sair volta para a tela de senha
   await page.click('#menu summary');

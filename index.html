@@ -36,6 +36,7 @@
           <button type="button" data-acao="exportar-json"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Exportar backup (JSON)</button>
           <button type="button" data-acao="importar-json"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M5 20h14"/></svg>Importar backup (JSON)</button>
           <button type="button" data-acao="exportar-csv"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>Exportar para Excel (CSV)</button>
+          <button type="button" data-acao="ordenar-data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M14 6h7M14 12h5M14 18h3"/></svg>Ordenar por data</button>
           <button type="button" data-acao="imprimir"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5a1 1 0 0 1-1 1h-2"/><rect x="7" y="14" width="10" height="6" rx="1"/></svg>Imprimir / salvar PDF</button>
           <hr>
           <button type="button" data-acao="exemplo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Carregar exemplo</button>
@@ -144,13 +145,18 @@
           </div>
         </div>
 
+        <label class="opcao">
+          <input type="checkbox" id="f-marco">
+          <span><b>É um marco</b> <span class="dica-inline">data única, como uma entrega ou reunião</span></span>
+        </label>
+
         <div class="duas-colunas">
           <div>
-            <label class="rotulo" for="f-inicio">Início *</label>
+            <label class="rotulo" for="f-inicio" id="rotulo-inicio">Início *</label>
             <input id="f-inicio" name="inicio" class="campo" type="date" required aria-describedby="e-inicio">
             <p class="erro" id="e-inicio" data-erro="inicio"></p>
           </div>
-          <div>
+          <div id="grupo-fim">
             <label class="rotulo" for="f-fim">Término *</label>
             <input id="f-fim" name="fim" class="campo" type="date" required aria-describedby="e-fim f-duracao">
             <p class="erro" id="e-fim" data-erro="fim"></p>
@@ -158,6 +164,12 @@
         </div>
         <p class="dica" id="f-duracao"></p>
 
+        <label class="opcao" id="grupo-marco-feito" hidden>
+          <input type="checkbox" id="f-marco-feito">
+          <span><b>Marco concluído</b></span>
+        </label>
+
+        <div id="grupo-progresso">
         <label class="rotulo" for="f-progresso">Progresso</label>
         <div class="progresso-campo">
           <input id="f-progresso-faixa" type="range" min="0" max="100" step="5" aria-label="Progresso (controle deslizante)">
@@ -167,6 +179,7 @@
           </div>
         </div>
         <p class="erro" id="e-progresso" data-erro="progresso"></p>
+        </div>
 
         <span class="rotulo" id="rotulo-notas">Notas</span>
         <div class="editor">

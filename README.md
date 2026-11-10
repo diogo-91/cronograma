@@ -22,6 +22,9 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 - **Notas com formatação:** negrito, itálico, sublinhado, listas com marcadores e numeradas. Só essas marcações são guardadas (sem atributos), e colar texto de fora entra sem formatação.
 - **Checklist** por atividade: itens marcáveis (Enter cria o próximo, Backspace num item vazio apaga). O contador aparece na lista e no Gantt; o progresso continua manual.
 - Status automático pela data de hoje: *Não iniciada*, *Em andamento*, *Atrasada* (passou do término sem 100%) e *Concluída*.
+- **Fases como grupos:** as atividades se agrupam pela fase, cada uma com uma linha-resumo (início, fim e progresso calculados) que recolhe e expande; cada aparelho lembra o que ficou recolhido.
+- **Ordem manual:** arraste pela alça (⋮⋮) para reordenar atividades ou fases inteiras; soltar uma atividade em outra fase muda a fase dela. Pelo teclado, foque a alça e use as setas. Com filtro ativo o arraste fica desligado. *Arquivo → Ordenar por data* refaz a ordem pela data de início (com Desfazer).
+- **Marcos:** atividades de data única (entregas, reuniões), desenhadas como losango; no editor, marque *É um marco* e, quando acontecer, *Marco concluído*.
 - **Gantt** com escala por dia, semana ou mês, linha de hoje, cores por fase e barra de progresso. Clique na barra ou no nome para editar. Em períodos longos a escala engrossa sozinha (dia até ~3 anos, semana até ~20 anos).
 - **Lista** em tabela no computador e em cartões no celular, com duplicar e excluir (com "Desfazer").
 - Resumo com progresso geral ponderado pela duração, contagem por status e período total.
@@ -60,7 +63,8 @@ SENHA=uma-senha-longa npm start   # http://localhost:3000, dados em ./dados
 npm test                          # testes unitários e do servidor, sem dependências
 npm install                       # instala o Playwright para o teste E2E
 npx playwright install chromium   # baixa o navegador, se ainda não tiver
-npm run test:e2e                  # login, vários aparelhos, conflito, queda de rede, celular e desktop; prints em e2e/saida/
+npm run test:e2e                  # (CHROMIUM_PATH=/caminho/do/chrome se o navegador do Playwright não estiver instalado)
+                                  # login, vários aparelhos, conflito, queda de rede, celular e desktop; prints em e2e/saida/
 ```
 
 Variáveis do servidor: `SENHA` (obrigatória), `PORTA` (padrão `3000`) e `PASTA_DADOS` (padrão `./dados`; no Docker, `/data`).

@@ -25,6 +25,8 @@
   const PARECE_HTML = /<\/?(b|strong|i|em|u|ul|ol|li|br|div|p)\b/i;
   const ICONES = {
     duplicar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
+    seta: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+    alca: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/></svg>',
     remover: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     checklist: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>',
     excluir: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>',
@@ -57,6 +59,7 @@
     zoom: 'semana',
     filtros: { texto: '', fase: '', status: '' },
     editando: null,
+    recolhidas: new Set(),
   };
   let rolarParaHoje = true;
   let hojeNoGantt = null;
@@ -73,6 +76,7 @@
   let empresaPreferida = null;
   let nomeAntesDeEditar = '';
   let checklistEditado = [];
+  let recolhidasPorEmpresa = {};
   const gravacoesSemResposta = new Set();
 
   function el(tag, props = {}, ...filhos) {
@@ -140,10 +144,14 @@
     document.body.dataset.tela = tela;
   }
 
+  function comOrdem(tarefas) {
+    return tarefas.every((t) => Number.isFinite(t.ordem)) ? tarefas : C.ordenarTarefas(tarefas).map((t, i) => ({ ...t, ordem: i }));
+  }
+
   function aplicarDocumento(doc) {
     revisao = doc.revisao;
     estado.titulo = doc.titulo;
-    estado.tarefas = doc.tarefas;
+    estado.tarefas = comOrdem(doc.tarefas);
   }
 
   function tratarFalhaDeCarga(status) {
@@ -161,6 +169,7 @@
     const r = await chamarApi('GET', `api/empresas/${id}`);
     if (r.status !== 200) return tratarFalhaDeCarga(r.status);
     empresaAtual = id;
+    estado.recolhidas = new Set(recolhidasPorEmpresa[id] || []);
     salvarPrefs();
     aplicarDocumento(r.dados);
     return true;
@@ -244,6 +253,7 @@
     if (VISOES.includes(prefs.visao)) estado.visao = prefs.visao;
     if (ZOOMS.includes(prefs.zoom)) estado.zoom = prefs.zoom;
     if (typeof prefs.empresa === 'string') empresaPreferida = prefs.empresa;
+    if (prefs.recolhidas && typeof prefs.recolhidas === 'object') recolhidasPorEmpresa = prefs.recolhidas;
   }
 
   function indicar(situacao) {
@@ -363,7 +373,8 @@
   }
 
   function salvarPrefs() {
-    gravar(CHAVE_PREFS, JSON.stringify({ visao: estado.visao, zoom: estado.zoom, empresa: empresaAtual }));
+    if (empresaAtual) recolhidasPorEmpresa[empresaAtual] = [...estado.recolhidas];
+    gravar(CHAVE_PREFS, JSON.stringify({ visao: estado.visao, zoom: estado.zoom, empresa: empresaAtual, recolhidas: recolhidasPorEmpresa }));
   }
 
   function avisar(mensagem, acao) {
@@ -401,8 +412,8 @@
     renderResumo(C.resumo(visiveis, hoje), filtrando);
     renderOpcoes(cores);
     if (vazio) renderVazio(semTarefas);
-    else if (estado.visao === 'gantt') renderGantt(visiveis, cores, hoje);
-    else renderTabela(visiveis, cores, hoje);
+    else if (estado.visao === 'gantt') renderGantt(visiveis, cores, hoje, !filtrando);
+    else renderTabela(visiveis, cores, hoje, !filtrando);
   }
 
   function renderResumo(r, filtrando) {
@@ -458,7 +469,136 @@
     $('#vazio').replaceChildren(...conteudo);
   }
 
-  function renderGantt(lista, cores, hoje) {
+  function agrupamento(lista, hoje) {
+    return lista.some((t) => t.fase) ? C.agruparPorFase(lista, hoje) : null;
+  }
+
+  function botaoRecolher(fase, rotulo, recolhida) {
+    return el('button', {
+      type: 'button',
+      class: 'recolher',
+      'aria-expanded': String(!recolhida),
+      'aria-label': `${recolhida ? 'Expandir' : 'Recolher'} ${rotulo}`,
+      title: recolhida ? 'Expandir' : 'Recolher',
+      onclick: () => alternarGrupo(fase),
+    }, icone('seta'));
+  }
+
+  function alternarGrupo(fase) {
+    if (estado.recolhidas.has(fase)) estado.recolhidas.delete(fase);
+    else estado.recolhidas.add(fase);
+    salvarPrefs();
+    render();
+    [...document.querySelectorAll('[data-arrastavel="fase"]')]
+      .find((linha) => linha.dataset.fase === fase && linha.offsetParent)
+      ?.querySelector('.recolher')
+      ?.focus();
+  }
+
+  function alca(tipo, valor, rotulo) {
+    return el('button', {
+      type: 'button',
+      class: 'alca',
+      'aria-label': `Mover ${tipo === 'fase' ? 'a fase' : ''} ${rotulo}. Use as setas para cima e para baixo.`,
+      title: 'Arraste para reordenar (ou use as setas do teclado)',
+      'data-alca': tipo,
+      'data-valor': valor,
+      onpointerdown: (ev) => iniciarArraste(ev, tipo, valor),
+      onkeydown: (ev) => moverPeloTeclado(ev, tipo, valor),
+    }, icone('alca'));
+  }
+
+  function focarAlca(tipo, valor) {
+    [...document.querySelectorAll(`[data-alca="${tipo}"]`)].find((b) => b.dataset.valor === valor && b.offsetParent)?.focus();
+  }
+
+  function aplicarNovaOrdem(novas, tipo, valor) {
+    const antes = C.ordenarTarefas(estado.tarefas).map((t) => `${t.id}:${t.fase}`).join('|');
+    const depois = C.ordenarTarefas(novas).map((t) => `${t.id}:${t.fase}`).join('|');
+    if (antes === depois) return;
+    estado.tarefas = novas;
+    salvar();
+    render();
+    focarAlca(tipo, valor);
+  }
+
+  function moverPeloTeclado(ev, tipo, valor) {
+    if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+    ev.preventDefault();
+    const subir = ev.key === 'ArrowUp';
+    const grupos = C.agruparPorFase(estado.tarefas);
+    if (tipo === 'fase') {
+      const i = grupos.findIndex((g) => g.fase === valor);
+      if (subir && i > 0) aplicarNovaOrdem(C.moverFase(estado.tarefas, valor, grupos[i - 1].fase), tipo, valor);
+      if (!subir && i < grupos.length - 1) aplicarNovaOrdem(C.moverFase(estado.tarefas, valor, grupos[i + 2]?.fase ?? null), tipo, valor);
+      return;
+    }
+    const gi = grupos.findIndex((g) => g.tarefas.some((t) => t.id === valor));
+    const grupo = grupos[gi];
+    const i = grupo.tarefas.findIndex((t) => t.id === valor);
+    let destino = null;
+    if (subir && i > 0) destino = [grupo.fase, grupo.tarefas[i - 1].id];
+    else if (subir && gi > 0) destino = [grupos[gi - 1].fase, null];
+    else if (!subir && i < grupo.tarefas.length - 1) destino = [grupo.fase, grupo.tarefas[i + 2]?.id ?? null];
+    else if (!subir && gi < grupos.length - 1) destino = [grupos[gi + 1].fase, grupos[gi + 1].tarefas[0].id];
+    if (destino) aplicarNovaOrdem(C.moverTarefa(estado.tarefas, valor, destino[0], destino[1]), tipo, valor);
+  }
+
+  function destinoDaSoltura(tipo, candidatos, indice) {
+    const depois = candidatos[indice];
+    const antes = candidatos[indice - 1];
+    if (tipo === 'fase') return [depois ? depois.dataset.fase : null];
+    if (depois?.dataset.arrastavel === 'tarefa') return [depois.dataset.fase, depois.dataset.id];
+    if (antes) return [antes.dataset.fase, null];
+    const primeira = C.agruparPorFase(estado.tarefas).find((g) => g.fase === depois.dataset.fase)?.tarefas[0];
+    return [depois.dataset.fase, primeira ? primeira.id : null];
+  }
+
+  function iniciarArraste(ev, tipo, valor) {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const alvo = ev.currentTarget;
+    alvo.setPointerCapture(ev.pointerId);
+    const raiz = estado.visao === 'gantt' ? caixaGantt : $('#vista-tabela');
+    const candidatos = [...raiz.querySelectorAll(tipo === 'fase' ? '[data-arrastavel="fase"]' : '[data-arrastavel]')];
+    const origem = alvo.closest('[data-arrastavel]');
+    const indicador = el('div', { class: 'indicador-soltar' });
+    document.body.append(indicador);
+    origem.classList.add('arrastando');
+    let indice = null;
+
+    const mover = (e) => {
+      const caixa = raiz.getBoundingClientRect();
+      if (e.clientY < caixa.top + 40) raiz.scrollTop -= 12;
+      if (e.clientY > caixa.bottom - 40) raiz.scrollTop += 12;
+      if (e.clientY < 60) window.scrollBy(0, -12);
+      if (e.clientY > innerHeight - 60) window.scrollBy(0, 12);
+      indice = candidatos.findIndex((linha) => {
+        const r = linha.getBoundingClientRect();
+        return e.clientY < r.top + r.height / 2;
+      });
+      if (indice < 0) indice = candidatos.length;
+      const referencia = candidatos[Math.min(indice, candidatos.length - 1)].getBoundingClientRect();
+      const topo = indice < candidatos.length ? referencia.top : referencia.bottom;
+      indicador.style.setProperty('top', `${topo - 1}px`);
+      indicador.style.setProperty('left', `${caixa.left}px`);
+      indicador.style.setProperty('width', `${caixa.width}px`);
+    };
+    const encerrar = (aplicar) => {
+      alvo.removeEventListener('pointermove', mover);
+      indicador.remove();
+      origem.classList.remove('arrastando');
+      if (!aplicar || indice === null) return;
+      const [fase, referencia] = destinoDaSoltura(tipo, candidatos, indice);
+      const novas = tipo === 'fase' ? C.moverFase(estado.tarefas, valor, fase) : C.moverTarefa(estado.tarefas, valor, fase, referencia === valor ? null : referencia);
+      aplicarNovaOrdem(novas, tipo, valor);
+    };
+    alvo.addEventListener('pointermove', mover);
+    alvo.addEventListener('pointerup', () => encerrar(true), { once: true });
+    alvo.addEventListener('pointercancel', () => encerrar(false), { once: true });
+  }
+
+  function renderGantt(lista, cores, hoje, podeArrastar) {
     const e = C.escalaGantt(lista, estado.zoom, hoje);
     const px = (n) => `${n}px`;
     hojeNoGantt = e.hojeLeft === null ? null : e.hojeLeft + e.pxDia / 2;
@@ -485,16 +625,31 @@
       hojeNoGantt !== null && el('div', { class: 'g-hoje-marcador', title: `Hoje, ${C.formatarData(hoje)}`, style: { left: px(hojeNoGantt) } }),
     );
 
-    const linhas = lista.map((t) => {
+    const posicaoDe = (inicio, fim) => ({
+      left: px((C.diaNumero(inicio) - e.inicioDia) * e.pxDia),
+      width: px((C.diaNumero(fim) - C.diaNumero(inicio) + 1) * e.pxDia),
+    });
+
+    const linhaTarefa = (t) => {
       const status = C.statusTarefa(t, hoje);
       const barra = e.barras[t.id];
-      const descricao = `${t.nome}: ${C.formatarData(t.inicio)} a ${C.formatarData(t.fim)}, ${t.progresso}% concluído, ${C.ROTULO_STATUS[status]}`;
-      return el('div', { class: 'g-linha', style: { '--cor': corDa(t, cores) } },
-        el('button', { type: 'button', class: 'g-nome', title: t.nome, 'data-id': t.id, onclick: () => abrirEditor(t.id) },
-          el('span', { class: 'g-nome-texto' }, t.nome),
-          el('span', { class: 'g-nome-datas' }, `${dataCurta(t.inicio)} – ${dataCurta(t.fim)}${textoChecklist(t)}`)),
-        el('div', { class: 'g-trilho' },
-          el('button', {
+      const marco = t.tipo === 'marco';
+      const periodo = marco ? C.formatarData(t.inicio) : `${C.formatarData(t.inicio)} a ${C.formatarData(t.fim)}`;
+      const situacao = marco ? (t.progresso >= 100 ? 'concluído' : 'pendente') : `${t.progresso}% concluído`;
+      const descricao = `${marco ? 'Marco ' : ''}${t.nome}: ${periodo}, ${situacao}, ${C.ROTULO_STATUS[status]}`;
+      const datas = marco ? `${dataCurta(t.inicio)} · marco` : `${dataCurta(t.inicio)} – ${dataCurta(t.fim)}`;
+      const desenho = marco
+        ? el('button', {
+            type: 'button',
+            class: `g-marco ${status}`,
+            style: { left: px(barra.left + e.pxDia / 2) },
+            title: descricao,
+            'aria-label': descricao,
+            onclick: () => abrirEditor(t.id),
+          },
+          el('span', { class: 'g-losango' }),
+          el('span', { class: 'g-rotulo' }, status === 'atrasada' ? `${dataCurta(t.inicio)} · atrasado` : dataCurta(t.inicio)))
+        : el('button', {
             type: 'button',
             class: `g-barra ${status}`,
             style: { left: px(barra.left), width: px(barra.width) },
@@ -503,8 +658,42 @@
             onclick: () => abrirEditor(t.id),
           },
           el('span', { class: 'g-progresso', style: { width: `${t.progresso}%` } }),
-          el('span', { class: 'g-rotulo' }, status === 'atrasada' ? `${t.progresso}% · atrasada` : `${t.progresso}%`))));
-    });
+          el('span', { class: 'g-rotulo' }, status === 'atrasada' ? `${t.progresso}% · atrasada` : `${t.progresso}%`));
+      return el('div', { class: 'g-linha', style: { '--cor': corDa(t, cores) }, 'data-arrastavel': 'tarefa', 'data-id': t.id, 'data-fase': t.fase },
+        el('div', { class: 'g-nome' },
+          podeArrastar && alca('tarefa', t.id, t.nome),
+          el('button', { type: 'button', class: 'g-nome-abrir', title: t.nome, 'data-id': t.id, onclick: () => abrirEditor(t.id) },
+            el('span', { class: 'g-nome-texto' }, t.nome),
+            el('span', { class: 'g-nome-datas' }, `${datas}${textoChecklist(t)}`))),
+        el('div', { class: 'g-trilho' }, desenho));
+    };
+
+    const linhaGrupo = (g) => {
+      const recolhida = estado.recolhidas.has(g.fase);
+      const rotulo = g.fase || 'Sem fase';
+      const cor = g.fase ? corDa({ fase: g.fase }, cores) : 'var(--fase-sem)';
+      const contagem = `${g.total} ${g.total === 1 ? 'atividade' : 'atividades'}`;
+      return el('div', { class: `g-linha g-grupo${recolhida ? ' recolhida' : ''}`, style: { '--cor': cor }, 'data-arrastavel': 'fase', 'data-fase': g.fase },
+        el('div', { class: 'g-nome g-nome-grupo' },
+          podeArrastar && alca('fase', g.fase, rotulo),
+          botaoRecolher(g.fase, rotulo, recolhida),
+          el('span', { class: 'g-grupo-texto' },
+            el('span', { class: 'g-grupo-nome' }, rotulo),
+            el('span', { class: 'g-nome-datas' }, `${contagem} · ${dataCurta(g.inicio)} – ${dataCurta(g.fim)}`))),
+        el('div', { class: 'g-trilho' },
+          el('div', {
+            class: 'g-resumo',
+            style: posicaoDe(g.inicio, g.fim),
+            title: `${rotulo}: ${C.formatarData(g.inicio)} a ${C.formatarData(g.fim)}, ${g.progresso}% concluído`,
+          },
+          el('span', { class: 'g-resumo-progresso', style: { width: `${g.progresso}%` } }),
+          el('span', { class: 'g-rotulo' }, `${g.progresso}%`))));
+    };
+
+    const grupos = agrupamento(lista, hoje);
+    const linhas = grupos
+      ? grupos.flatMap((g) => [linhaGrupo(g), ...(estado.recolhidas.has(g.fase) ? [] : g.tarefas.map(linhaTarefa))])
+      : lista.map(linhaTarefa);
 
     const { scrollLeft, scrollTop } = caixaGantt;
     caixaGantt.replaceChildren(
@@ -532,14 +721,18 @@
     caixaGantt.scrollLeft = Math.max(0, hojeNoGantt - (caixaGantt.clientWidth - larguraNome) / 3);
   }
 
-  function renderTabela(lista, cores, hoje) {
+  function renderTabela(lista, cores, hoje, podeArrastar) {
     const celula = (rotulo, valor, classe) => el('td', { 'data-rotulo': rotulo, class: valor ? classe : `${classe} vazio-celula` }, valor || '—');
-    const linhas = lista.map((t) => {
+    const linhaTarefa = (t) => {
       const status = C.statusTarefa(t, hoje);
       const dias = C.duracaoDias(t);
-      return el('tr', { style: { '--cor': corDa(t, cores) } },
+      const marco = t.tipo === 'marco';
+      return el('tr', { class: 'linha-tarefa', style: { '--cor': corDa(t, cores) }, 'data-arrastavel': 'tarefa', 'data-id': t.id, 'data-fase': t.fase },
         el('td', { class: 'c-nome' },
-          el('button', { type: 'button', class: 'nome-link', 'data-id': t.id, onclick: () => abrirEditor(t.id) }, el('span', { class: 'ponto' }), el('span', {}, t.nome)),
+          el('div', { class: 'nome-linha' },
+            podeArrastar && alca('tarefa', t.id, t.nome),
+            el('button', { type: 'button', class: 'nome-link', 'data-id': t.id, onclick: () => abrirEditor(t.id) },
+              el('span', { class: marco ? 'ponto losango' : 'ponto' }), el('span', {}, t.nome))),
           t.notas && el('div', { class: 'notas' }, C.notasEmTexto(t.notas)),
           resumoChecklistEl(t)),
         celula('Fase', t.fase, 'c-fase'),
@@ -547,17 +740,37 @@
           t.responsavel
             ? el('span', { class: 'pessoa' }, el('span', { class: 'avatar', 'aria-hidden': 'true' }, C.iniciais(t.responsavel)), el('span', {}, t.responsavel))
             : '—'),
-        celula('Início', C.formatarData(t.inicio), 'data c-inicio'),
-        celula('Término', C.formatarData(t.fim), 'data c-fim'),
-        celula('Duração', `${dias} ${dias === 1 ? 'dia' : 'dias'}`, 'num c-dur'),
+        celula(marco ? 'Data' : 'Início', C.formatarData(t.inicio), 'data c-inicio'),
+        marco ? el('td', { class: 'data c-fim vazio-celula' }, '—') : celula('Término', C.formatarData(t.fim), 'data c-fim'),
+        celula('Duração', marco ? 'Marco' : `${dias} ${dias === 1 ? 'dia' : 'dias'}`, 'num c-dur'),
         el('td', { class: 'c-progresso' },
-          el('div', { class: 'progresso-celula' }, el('div', { class: 'medidor' }, el('span', { style: { width: `${t.progresso}%` } })), el('b', {}, `${t.progresso}%`))),
+          marco
+            ? el('span', { class: 'marco-situacao' }, t.progresso >= 100 ? 'Marco concluído' : 'Marco pendente')
+            : el('div', { class: 'progresso-celula' }, el('div', { class: 'medidor' }, el('span', { style: { width: `${t.progresso}%` } })), el('b', {}, `${t.progresso}%`))),
         el('td', { class: 'c-status' }, el('span', { class: `selo ${status}` }, C.ROTULO_STATUS[status])),
         el('td', { class: 'c-acoes' },
           el('div', { class: 'acoes-linha' },
             el('button', { type: 'button', class: 'btn-icone', title: 'Duplicar', 'aria-label': `Duplicar ${t.nome}`, onclick: () => duplicar(t.id) }, icone('duplicar')),
             el('button', { type: 'button', class: 'btn-icone perigo', title: 'Excluir', 'aria-label': `Excluir ${t.nome}`, onclick: () => excluir(t.id) }, icone('excluir')))));
-    });
+    };
+    const linhaGrupo = (g) => {
+      const recolhida = estado.recolhidas.has(g.fase);
+      const rotulo = g.fase || 'Sem fase';
+      const cor = g.fase ? corDa({ fase: g.fase }, cores) : 'var(--fase-sem)';
+      return el('tr', { class: `linha-grupo${recolhida ? ' recolhida' : ''}`, style: { '--cor': cor }, 'data-arrastavel': 'fase', 'data-fase': g.fase },
+        el('td', { colspan: '9' },
+          el('div', { class: 'grupo-cabecalho' },
+            podeArrastar && alca('fase', g.fase, rotulo),
+            botaoRecolher(g.fase, rotulo, recolhida),
+            el('span', { class: 'ponto' }),
+            el('span', { class: 'grupo-nome' }, rotulo),
+            el('span', { class: 'grupo-detalhe' }, `${g.total} ${g.total === 1 ? 'atividade' : 'atividades'} · ${C.formatarData(g.inicio)} a ${C.formatarData(g.fim)}`),
+            el('span', { class: 'grupo-progresso' }, el('span', { class: 'medidor' }, el('span', { style: { width: `${g.progresso}%` } })), `${g.progresso}%`))));
+    };
+    const grupos = agrupamento(lista, hoje);
+    const linhas = grupos
+      ? grupos.flatMap((g) => [linhaGrupo(g), ...(estado.recolhidas.has(g.fase) ? [] : g.tarefas.map(linhaTarefa))])
+      : lista.map(linhaTarefa);
     const cabecalho = ['Atividade', 'Fase', 'Responsável', 'Início', 'Término', 'Duração', 'Progresso', 'Status', ''];
     $('#vista-tabela').replaceChildren(
       el('table', { class: 'tabela' },
@@ -581,6 +794,9 @@
     };
     estado.editando = tarefa ? tarefa.id : null;
     for (const campo of CAMPOS) form.elements[campo].value = valores[campo];
+    $('#f-marco').checked = valores.tipo === 'marco';
+    $('#f-marco-feito').checked = valores.progresso >= 100;
+    aplicarTipoNoEditor();
     notasParaEditor(valores.notas || '');
     checklistEditado = (valores.checklist || []).map((item) => ({ ...item }));
     renderChecklistEditor();
@@ -592,6 +808,16 @@
     atualizarDuracao();
     dialogo.showModal();
     if (!tarefa) form.elements.nome.focus();
+  }
+
+  function aplicarTipoNoEditor() {
+    const marco = $('#f-marco').checked;
+    $('#grupo-fim').hidden = marco;
+    $('#f-duracao').hidden = marco;
+    $('#grupo-progresso').hidden = marco;
+    $('#grupo-marco-feito').hidden = !marco;
+    $('#rotulo-inicio').textContent = marco ? 'Data *' : 'Início *';
+    if (marco) limparErro('fim');
   }
 
   function atualizarFaixa(valor) {
@@ -737,7 +963,16 @@
 
   function salvarEditor(evento) {
     evento.preventDefault();
-    const r = C.validarTarefa({ ...Object.fromEntries(new FormData(form)), notas: notasDoEditor(), checklist: checklistEditado });
+    const marco = $('#f-marco').checked;
+    const existente = estado.tarefas.find((t) => t.id === estado.editando);
+    const proximaOrdem = Math.max(-1, ...estado.tarefas.map((t) => t.ordem).filter(Number.isFinite)) + 1;
+    const dados = { ...Object.fromEntries(new FormData(form)), notas: notasDoEditor(), checklist: checklistEditado };
+    const r = C.validarTarefa({
+      ...dados,
+      tipo: marco ? 'marco' : 'tarefa',
+      progresso: marco ? ($('#f-marco-feito').checked ? 100 : 0) : dados.progresso,
+      ordem: existente ? existente.ordem : proximaOrdem,
+    });
     if (form.elements.progresso.validity.badInput) r.erros.progresso = 'Digite um número de 0 a 100.';
     mostrarErros(r.erros);
     if (Object.keys(r.erros).length) {
@@ -759,7 +994,7 @@
   }
 
   function focarTarefa(id) {
-    const alvo = [...document.querySelectorAll('[data-id]')].find((e) => e.dataset.id === id && e.offsetParent);
+    const alvo = [...document.querySelectorAll('button[data-id]')].find((e) => e.dataset.id === id && e.offsetParent);
     if (alvo) alvo.focus();
     else $('#btn-nova').focus({ preventScroll: true });
   }
@@ -797,6 +1032,7 @@
       id: C.novoId(),
       nome: `${original.nome} (cópia)`,
       progresso: 0,
+      ordem: (Number.isFinite(original.ordem) ? original.ordem : estado.tarefas.length) + 0.5,
       checklist: (original.checklist || []).map((item) => ({ ...item, feito: false })),
     };
     estado.tarefas.push(copia);
@@ -819,7 +1055,7 @@
 
   function substituirTudo(titulo, tarefas) {
     estado.titulo = titulo;
-    estado.tarefas = tarefas;
+    estado.tarefas = comOrdem(tarefas);
     zerarFiltros();
     rolarParaHoje = true;
     const gravacao = salvar();
@@ -839,7 +1075,7 @@
       ['Back-end e integrações', 'Desenvolvimento', 'Diego', 0, 18, 10],
       ['Front-end', 'Desenvolvimento', 'Elisa', 3, 17, 0],
       ['Testes e ajustes', 'Testes', 'Carla', 18, 24, 0],
-      ['Publicação', 'Lançamento', 'Diego', 25, 25, 0],
+      ['Publicação no ar', 'Lançamento', 'Diego', 25, 25, 0, 'marco'],
       ['Divulgação', 'Lançamento', 'Ana', 26, 33, 0],
     ];
     const detalhes = {
@@ -852,8 +1088,8 @@
         ],
       },
     };
-    substituirTudo(estado.titulo, itens.map(([nome, fase, responsavel, inicio, fim, progresso]) => ({
-      id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso,
+    substituirTudo(estado.titulo, itens.map(([nome, fase, responsavel, inicio, fim, progresso, tipo = 'tarefa'], ordem) => ({
+      id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso, tipo, ordem,
       notas: detalhes[nome]?.notas || '', checklist: detalhes[nome]?.checklist || [],
     }))).then((ok) => ok && avisar('Exemplo carregado. Edite ou apague à vontade.'));
   }
@@ -900,6 +1136,20 @@
     'apagar-tudo': () => {
       if (!estado.tarefas.length || !confirm(`Apagar as ${estado.tarefas.length} atividades deste cronograma? Essa ação não pode ser desfeita.`)) return;
       substituirTudo(estado.titulo, []).then((ok) => ok && avisar('Atividades apagadas.'));
+    },
+    'ordenar-data': () => {
+      if (!estado.tarefas.length) return;
+      const anteriores = estado.tarefas;
+      estado.tarefas = C.ordenarPorData(estado.tarefas);
+      salvar().then((ok) => ok && avisar('Atividades ordenadas por data de início.', {
+        rotulo: 'Desfazer',
+        executar: () => {
+          estado.tarefas = anteriores;
+          salvar();
+          render();
+        },
+      }));
+      render();
     },
     'excluir-empresa': async () => {
       if (empresas.length <= 1) {
@@ -1036,6 +1286,7 @@
   $('#arquivo').addEventListener('change', importarArquivo);
 
   form.addEventListener('submit', salvarEditor);
+  $('#f-marco').addEventListener('change', aplicarTipoNoEditor);
   document.execCommand('styleWithCSS', false, false);
   for (const botao of document.querySelectorAll('[data-comando]')) {
     botao.addEventListener('mousedown', (ev) => ev.preventDefault());
