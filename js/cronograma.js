@@ -8,6 +8,8 @@ const Cronograma = (() => {
   const MAX_NOTAS = 20000;
   const MAX_ITENS_CHECKLIST = 200;
   const MAX_TEXTO_ITEM = 300;
+  const MAX_DEPENDENCIAS = 50;
+  const MAX_FOLGA = 365;
   const MAX_DIAS_ZOOM = { dia: 1100, semana: 7300 };
   const ANO_MINIMO = 1900;
   const ANO_MAXIMO = 2199;
@@ -99,6 +101,7 @@ const Cronograma = (() => {
         .filter((item) => item.texto),
       tipo: dados.tipo === 'marco' ? 'marco' : 'tarefa',
       ordem: Number.isFinite(dados.ordem) ? dados.ordem : null,
+      dependencias: normalizarDependencias(dados.dependencias),
     };
     if (tarefa.tipo === 'marco') tarefa.fim = tarefa.inicio;
     const erros = {};
@@ -170,6 +173,97 @@ const Cronograma = (() => {
         posteriores = [];
       },
     };
+  }
+
+  function normalizarDependencias(lista) {
+    const vistos = new Set();
+    const saida = [];
+    for (const d of Array.isArray(lista) ? lista : []) {
+      if (!d || typeof d !== 'object' || typeof d.id !== 'string' || !d.id || vistos.has(d.id)) continue;
+      vistos.add(d.id);
+      const folga = Math.round(Number(d.folga) || 0);
+      saida.push({ id: d.id.slice(0, 64), folga: Math.max(-MAX_FOLGA, Math.min(MAX_FOLGA, folga)) });
+    }
+    return saida.slice(0, MAX_DEPENDENCIAS);
+  }
+
+  function encontrarCiclo(tarefas) {
+    const porId = new Map(tarefas.map((t) => [t.id, t]));
+    const situacao = new Map();
+    const caminho = [];
+    const visitar = (id) => {
+      situacao.set(id, 'visitando');
+      caminho.push(id);
+      for (const d of porId.get(id).dependencias || []) {
+        if (!porId.has(d.id)) continue;
+        if (situacao.get(d.id) === 'visitando') return [...caminho.slice(caminho.indexOf(d.id)), d.id];
+        if (!situacao.has(d.id)) {
+          const ciclo = visitar(d.id);
+          if (ciclo) return ciclo;
+        }
+      }
+      situacao.set(id, 'feito');
+      caminho.pop();
+      return null;
+    };
+    for (const t of tarefas) {
+      if (situacao.has(t.id)) continue;
+      const ciclo = visitar(t.id);
+      if (ciclo) return ciclo.map((id) => porId.get(id).nome);
+    }
+    return null;
+  }
+
+  function sucessoresDe(tarefas, id) {
+    const seguintes = new Map();
+    for (const t of tarefas) {
+      for (const d of t.dependencias || []) {
+        if (!seguintes.has(d.id)) seguintes.set(d.id, []);
+        seguintes.get(d.id).push(t.id);
+      }
+    }
+    const achados = new Set();
+    const fila = [...(seguintes.get(id) || [])];
+    while (fila.length) {
+      const atual = fila.shift();
+      if (achados.has(atual) || atual === id) continue;
+      achados.add(atual);
+      fila.push(...(seguintes.get(atual) || []));
+    }
+    return achados;
+  }
+
+  function reagendar(tarefas) {
+    const porId = new Map(tarefas.map((t) => [t.id, t]));
+    const pendentes = new Map(tarefas.map((t) => [t.id, (t.dependencias || []).filter((d) => porId.has(d.id)).length]));
+    const seguintes = new Map();
+    for (const t of tarefas) for (const d of t.dependencias || []) if (porId.has(d.id)) seguintes.set(d.id, [...(seguintes.get(d.id) || []), t.id]);
+    const fila = tarefas.filter((t) => pendentes.get(t.id) === 0).map((t) => t.id);
+    const movidas = [];
+    let processadas = 0;
+    while (fila.length) {
+      const id = fila.shift();
+      processadas += 1;
+      const t = porId.get(id);
+      const preds = (t.dependencias || []).filter((d) => porId.has(d.id));
+      if (preds.length) {
+        const maisCedo = Math.max(...preds.map((d) => diaNumero(porId.get(d.id).fim) + 1 + d.folga));
+        const inicio = diaNumero(t.inicio);
+        if (inicio < maisCedo) {
+          const movida = deslocarTarefa(t, maisCedo - inicio);
+          if (movida !== t) {
+            porId.set(id, movida);
+            movidas.push(id);
+          }
+        }
+      }
+      for (const s of seguintes.get(id) || []) {
+        pendentes.set(s, pendentes.get(s) - 1);
+        if (pendentes.get(s) === 0) fila.push(s);
+      }
+    }
+    if (processadas < tarefas.length) return { tarefas, movidas: [] };
+    return { tarefas: tarefas.map((t) => porId.get(t.id)), movidas };
   }
 
   function compararPorData(a, b) {
@@ -379,6 +473,9 @@ const Cronograma = (() => {
       ids.add(id);
       tarefas.push({ id, ...r.tarefa });
     }
+    for (const t of tarefas) t.dependencias = t.dependencias.filter((d) => d.id !== t.id && ids.has(d.id));
+    const ciclo = encontrarCiclo(tarefas);
+    if (ciclo) return { ok: false, erro: `As dependências formam um ciclo: ${ciclo.join(' → ')}.` };
     return { ok: true, dados: { titulo: texto(bruto.titulo) || 'Meu cronograma', tarefas } };
   }
 
@@ -406,6 +503,8 @@ const Cronograma = (() => {
     ordenarTarefas,
     ordenarPorData,
     deslocarTarefa,
+    sucessoresDe,
+    reagendar,
     redimensionarTarefa,
     progressoPelaPosicao,
     criarHistorico,

@@ -900,6 +900,13 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
 .item-checklist input[type="checkbox"] { flex: none; width: 20px; height: 20px; accent-color: var(--ouro); cursor: pointer; }
 .item-checklist .campo { min-height: 36px; padding: 6px 10px; }
 .item-checklist input[type="checkbox"]:checked + .campo { color: var(--texto-suave); text-decoration: line-through; }
+.item-dependencia select.campo { flex: 1 1 auto; min-width: 0; min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
+.folga { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 0.8rem; color: var(--texto-suave); }
+.folga .campo { width: 64px; min-height: 36px; padding: 6px 8px; text-align: right; }
+.dependencias-resumo { margin: 2px 0 0 20px; font-size: 0.78rem; color: var(--texto-suave); }
+.g-setas { position: absolute; top: 0; left: 0; z-index: 0; overflow: visible; pointer-events: none; }
+.g-seta { fill: none; stroke: #8b8a93; stroke-width: 1.5; }
+.g-seta-ponta { fill: #8b8a93; }
 .btn-pequeno { min-height: 34px; padding: 4px 12px; font-size: 0.85rem; }
 .btn-pequeno svg { width: 16px; height: 16px; }
 .checklist-resumo { display: inline-flex; align-items: center; gap: 4px; margin: 2px 0 0 20px; font-size: 0.78rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
@@ -1042,6 +1049,9 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
   .tabela .c-nome .ponto { display: none; }
   .tabela .notas { margin-left: 0; max-width: none; white-space: normal; }
   .tabela .checklist-resumo { margin-left: 0; }
+  .tabela .dependencias-resumo { margin-left: 0; }
+  .item-dependencia { flex-wrap: wrap; }
+  .item-dependencia select.campo { flex-basis: 100%; }
   .tabela .avatar { width: 22px; height: 22px; font-size: 0.62rem; }
   .tabela .vazio-celula { display: none; }
 

@@ -76,6 +76,8 @@
   let empresaPreferida = null;
   let nomeAntesDeEditar = '';
   let checklistEditado = [];
+  let dependenciasEditadas = [];
+  let observadorSetas = null;
   let recolhidasPorEmpresa = {};
   const historico = C.criarHistorico(50);
   const gravacoesSemResposta = new Set();
@@ -170,13 +172,126 @@
     avisar(direcao === 'desfazer' ? 'Alteração desfeita.' : 'Alteração refeita.');
   }
 
+  function reagendarSeguintes() {
+    const { tarefas, movidas } = C.reagendar(estado.tarefas);
+    estado.tarefas = tarefas;
+    return movidas;
+  }
+
+  function textoReagendadas(quantidade) {
+    return `${quantidade} ${quantidade === 1 ? 'atividade seguinte foi reagendada' : 'atividades seguintes foram reagendadas'} por causa das dependências.`;
+  }
+
   function aplicarAlteracaoTarefa(nova) {
     const indice = estado.tarefas.findIndex((t) => t.id === nova.id);
     if (indice < 0) return;
     registrarHistorico();
     estado.tarefas[indice] = nova;
-    salvar();
+    const reagendadas = reagendarSeguintes().filter((id) => id !== nova.id).length;
+    salvar().then((ok) => ok && reagendadas && avisar(textoReagendadas(reagendadas), { rotulo: 'Desfazer', executar: () => voltarNoHistorico('desfazer') }));
     render();
+  }
+
+  function nomeDa(id) {
+    return estado.tarefas.find((t) => t.id === id)?.nome || '';
+  }
+
+  function renderDependenciasEditor(focar) {
+    const proibidas = estado.editando ? C.sucessoresDe(estado.tarefas, estado.editando) : new Set();
+    const candidatas = C.ordenarTarefas(estado.tarefas).filter((t) => t.id !== estado.editando && !proibidas.has(t.id));
+    const lista = $('#f-dependencias');
+    lista.replaceChildren(...dependenciasEditadas.map((dep, i) => {
+      const escolhidasPorOutras = new Set(dependenciasEditadas.filter((_, j) => j !== i).map((d) => d.id));
+      const opcoes = candidatas.filter((t) => !escolhidasPorOutras.has(t.id));
+      const porFase = C.agruparPorFase(opcoes);
+      const opcao = (t) => el('option', { value: t.id, selected: t.id === dep.id }, t.nome);
+      return el('li', { class: 'item-checklist item-dependencia' },
+        el('select', {
+          class: 'campo',
+          'aria-label': `Atividade anterior ${i + 1}`,
+          onchange: (ev) => {
+            dep.id = ev.target.value;
+            renderDependenciasEditor();
+          },
+        }, ...(porFase.length > 1 || porFase[0]?.fase
+          ? porFase.map((g) => el('optgroup', { label: g.fase || 'Sem fase' }, ...g.tarefas.map(opcao)))
+          : opcoes.map(opcao))),
+        el('label', { class: 'folga' },
+          el('span', {}, 'folga'),
+          el('input', {
+            type: 'number',
+            class: 'campo',
+            value: String(dep.folga),
+            step: '1',
+            min: '-365',
+            max: '365',
+            inputmode: 'numeric',
+            title: 'Dias entre o fim da anterior e o início desta (negativo sobrepõe)',
+            'aria-label': `Dias de folga depois de ${nomeDa(dep.id)}`,
+            oninput: (ev) => {
+              dep.folga = Math.round(Number(ev.target.value) || 0);
+            },
+          }),
+          el('span', {}, 'dias')),
+        el('button', {
+          type: 'button',
+          class: 'btn-icone',
+          title: 'Remover dependência',
+          'aria-label': `Remover dependência de ${nomeDa(dep.id)}`,
+          onclick: () => {
+            dependenciasEditadas.splice(i, 1);
+            renderDependenciasEditor();
+          },
+        }, icone('remover')));
+    }));
+    const escolhidas = new Set(dependenciasEditadas.map((d) => d.id));
+    $('#btn-dependencia').disabled = !candidatas.some((t) => !escolhidas.has(t.id));
+    if (focar != null) lista.querySelectorAll('select')[focar]?.focus();
+  }
+
+  function desenharSetas(grade) {
+    grade.querySelector('.g-setas')?.remove();
+    const caixa = grade.getBoundingClientRect();
+    const barras = new Map([...grade.querySelectorAll('[data-barra]')].map((b) => [b.dataset.barra, b.getBoundingClientRect()]));
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('class', 'g-setas');
+    svg.setAttribute('width', String(grade.scrollWidth));
+    svg.setAttribute('height', String(grade.scrollHeight));
+    svg.setAttribute('aria-hidden', 'true');
+    const defs = document.createElementNS(svgNs, 'defs');
+    const marcador = document.createElementNS(svgNs, 'marker');
+    for (const [k, v] of Object.entries({ id: 'ponta-seta', viewBox: '0 0 8 8', refX: '7', refY: '4', markerWidth: '7', markerHeight: '7', orient: 'auto' })) marcador.setAttribute(k, v);
+    const ponta = document.createElementNS(svgNs, 'path');
+    ponta.setAttribute('d', 'M0 0L8 4L0 8z');
+    ponta.setAttribute('class', 'g-seta-ponta');
+    marcador.append(ponta);
+    defs.append(marcador);
+    svg.append(defs);
+    for (const t of estado.tarefas) {
+      const b = barras.get(t.id);
+      if (!b) continue;
+      for (const d of t.dependencias || []) {
+        const a = barras.get(d.id);
+        if (!a) continue;
+        const x1 = a.right - caixa.left;
+        const y1 = a.top + a.height / 2 - caixa.top;
+        const x2 = b.left - caixa.left;
+        const y2 = b.top + b.height / 2 - caixa.top;
+        const desce = y2 > y1;
+        const rota = x2 - x1 >= 14
+          ? `M${x1} ${y1}H${x1 + 5}V${y2}H${x2 - 1}`
+          : `M${x1} ${y1}H${x1 + 5}V${desce ? b.top - caixa.top - 6 : b.bottom - caixa.top + 6}H${x2 - 10}V${y2}H${x2 - 1}`;
+        const caminho = document.createElementNS(svgNs, 'path');
+        caminho.setAttribute('d', rota);
+        caminho.setAttribute('class', 'g-seta');
+        caminho.setAttribute('marker-end', 'url(#ponta-seta)');
+        caminho.setAttribute('data-de', d.id);
+        caminho.setAttribute('data-para', t.id);
+        svg.append(caminho);
+      }
+    }
+    grade.append(svg);
   }
 
   function moverBarraPeloTeclado(ev, tarefa) {
@@ -825,6 +940,11 @@
         fundo,
         ...linhas),
     );
+    const grade = caixaGantt.querySelector('.g-grade');
+    desenharSetas(grade);
+    observadorSetas?.disconnect();
+    observadorSetas = new ResizeObserver(() => desenharSetas(grade));
+    observadorSetas.observe(grade);
     $('#btn-hoje').disabled = hojeNoGantt === null;
     if (rolarParaHoje) {
       rolarParaHoje = false;
@@ -857,7 +977,9 @@
             el('button', { type: 'button', class: 'nome-link', 'data-id': t.id, onclick: () => abrirEditor(t.id) },
               el('span', { class: marco ? 'ponto losango' : 'ponto' }), el('span', {}, t.nome))),
           t.notas && el('div', { class: 'notas' }, C.notasEmTexto(t.notas)),
-          resumoChecklistEl(t)),
+          resumoChecklistEl(t),
+          (t.dependencias || []).length > 0 && el('div', { class: 'dependencias-resumo' },
+            `depois de: ${t.dependencias.map((d) => nomeDa(d.id)).filter(Boolean).join(', ')}`)),
         celula('Fase', t.fase, 'c-fase'),
         el('td', { 'data-rotulo': 'Responsável', class: t.responsavel ? 'c-resp' : 'c-resp vazio-celula' },
           t.responsavel
@@ -922,6 +1044,8 @@
     aplicarTipoNoEditor();
     notasParaEditor(valores.notas || '');
     checklistEditado = (valores.checklist || []).map((item) => ({ ...item }));
+    dependenciasEditadas = (valores.dependencias || []).map((d) => ({ ...d }));
+    renderDependenciasEditor();
     renderChecklistEditor();
     atualizarFaixa(valores.progresso);
     $('#dialogo-titulo').textContent = tarefa ? 'Editar atividade' : 'Nova atividade';
@@ -1089,7 +1213,7 @@
     const marco = $('#f-marco').checked;
     const existente = estado.tarefas.find((t) => t.id === estado.editando);
     const proximaOrdem = Math.max(-1, ...estado.tarefas.map((t) => t.ordem).filter(Number.isFinite)) + 1;
-    const dados = { ...Object.fromEntries(new FormData(form)), notas: notasDoEditor(), checklist: checklistEditado };
+    const dados = { ...Object.fromEntries(new FormData(form)), notas: notasDoEditor(), checklist: checklistEditado, dependencias: dependenciasEditadas };
     const r = C.validarTarefa({
       ...dados,
       tipo: marco ? 'marco' : 'tarefa',
@@ -1107,13 +1231,22 @@
     const tarefa = { id: indice >= 0 ? estado.editando : C.novoId(), ...r.tarefa };
     if (indice >= 0) estado.tarefas[indice] = tarefa;
     else estado.tarefas.push(tarefa);
+    const movidas = reagendarSeguintes();
+    const propriaAjustada = movidas.includes(tarefa.id);
+    const reagendadas = movidas.length - (propriaAjustada ? 1 : 0);
     dialogo.close();
     const gravacao = salvar();
     render();
     focarTarefa(tarefa.id);
     const oculta = C.filtrarTarefas([tarefa], estado.filtros, C.hojeISO()).length === 0;
     gravacao.then((ok) => {
-      if (ok) avisar(oculta ? 'Atividade salva, mas oculta pelos filtros atuais.' : 'Atividade salva.', oculta && { rotulo: 'Limpar filtros', executar: limparFiltros });
+      if (!ok) return;
+      const ajustes = [
+        propriaAjustada && 'As datas dela foram ajustadas para depois das atividades das quais depende.',
+        reagendadas && textoReagendadas(reagendadas),
+      ].filter(Boolean);
+      if (ajustes.length) avisar(`Atividade salva. ${ajustes.join(' ')}`, { rotulo: 'Desfazer', executar: () => voltarNoHistorico('desfazer') });
+      else avisar(oculta ? 'Atividade salva, mas oculta pelos filtros atuais.' : 'Atividade salva.', oculta && { rotulo: 'Limpar filtros', executar: limparFiltros });
     });
   }
 
@@ -1132,6 +1265,9 @@
     }
     registrarHistorico();
     const [removida] = estado.tarefas.splice(indice, 1);
+    estado.tarefas = estado.tarefas.map((t) => (t.dependencias || []).some((d) => d.id === id)
+      ? { ...t, dependencias: t.dependencias.filter((d) => d.id !== id) }
+      : t);
     const gravacao = salvar();
     render();
     focarTarefa(null);
@@ -1203,6 +1339,18 @@
       ['Publicação no ar', 'Lançamento', 'Diego', 25, 25, 0, 'marco'],
       ['Divulgação', 'Lançamento', 'Ana', 26, 33, 0],
     ];
+    const depende = {
+      'Cronograma e orçamento': [['Levantamento de requisitos', 0]],
+      Wireframes: [['Cronograma e orçamento', -2]],
+      'Aprovação do conteúdo': [['Cronograma e orçamento', -1]],
+      'Identidade visual': [['Aprovação do conteúdo', -3]],
+      'Back-end e integrações': [['Aprovação do conteúdo', 0]],
+      'Front-end': [['Wireframes', 1]],
+      'Testes e ajustes': [['Front-end', 0], ['Back-end e integrações', -1]],
+      'Publicação no ar': [['Testes e ajustes', 0]],
+      Divulgação: [['Publicação no ar', 0]],
+    };
+    const ids = Object.fromEntries(itens.map(([nome]) => [nome, C.novoId()]));
     const detalhes = {
       Wireframes: {
         notas: '<b>Referência:</b> manual da marca e site atual.<ul><li>Priorizar a versão para celular</li><li>Validar com o cliente na sexta</li></ul>',
@@ -1214,7 +1362,8 @@
       },
     };
     substituirTudo(estado.titulo, itens.map(([nome, fase, responsavel, inicio, fim, progresso, tipo = 'tarefa'], ordem) => ({
-      id: C.novoId(), nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso, tipo, ordem,
+      id: ids[nome], nome, fase, responsavel, inicio: C.isoDeDia(hoje + inicio), fim: C.isoDeDia(hoje + fim), progresso, tipo, ordem,
+      dependencias: (depende[nome] || []).map(([anterior, folga]) => ({ id: ids[anterior], folga })),
       notas: detalhes[nome]?.notas || '', checklist: detalhes[nome]?.checklist || [],
     }))).then((ok) => ok && avisar('Exemplo carregado. Edite ou apague à vontade.'));
   }
@@ -1423,6 +1572,14 @@
   });
   form.addEventListener('submit', salvarEditor);
   $('#f-marco').addEventListener('change', aplicarTipoNoEditor);
+  $('#btn-dependencia').addEventListener('click', () => {
+    const proibidas = estado.editando ? C.sucessoresDe(estado.tarefas, estado.editando) : new Set();
+    const escolhidas = new Set(dependenciasEditadas.map((d) => d.id));
+    const livre = C.ordenarTarefas(estado.tarefas).find((t) => t.id !== estado.editando && !proibidas.has(t.id) && !escolhidas.has(t.id));
+    if (!livre) return;
+    dependenciasEditadas.push({ id: livre.id, folga: 0 });
+    renderDependenciasEditor(dependenciasEditadas.length - 1);
+  });
   document.execCommand('styleWithCSS', false, false);
   for (const botao of document.querySelectorAll('[data-comando]')) {
     botao.addEventListener('mousedown', (ev) => ev.preventDefault());

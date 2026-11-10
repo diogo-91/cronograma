@@ -325,3 +325,14 @@ test('arquivo de empresas ilegível é guardado à parte', async (t) => {
   assert.equal((await listar(base, cookie)).length, 1);
   assert.ok(fs.readdirSync(pasta).some((n) => n.startsWith('empresas.json.ilegivel-')));
 });
+
+test('servidor recusa dependências em ciclo', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  const r = await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'x', tarefas: [
+    { id: 'a', nome: 'A', inicio: '2026-10-01', fim: '2026-10-02', dependencias: [{ id: 'b' }] },
+    { id: 'b', nome: 'B', inicio: '2026-10-03', fim: '2026-10-04', dependencias: [{ id: 'a' }] },
+  ] });
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).erro, /ciclo/);
+});

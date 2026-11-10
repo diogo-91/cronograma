@@ -46,7 +46,7 @@ test('validarTarefa aponta cada campo inválido', () => {
 test('validarTarefa normaliza texto e progresso de uma tarefa válida', () => {
   const r = C.validarTarefa({ nome: '  Fundação ', fase: ' Obra ', responsavel: ' Ana ', inicio: '2026-10-01', fim: '2026-10-05', progresso: '42.6', notas: 'n' });
   assert.equal(r.ok, true);
-  assert.deepEqual(r.tarefa, { nome: 'Fundação', fase: 'Obra', responsavel: 'Ana', inicio: '2026-10-01', fim: '2026-10-05', progresso: 43, notas: 'n', checklist: [], tipo: 'tarefa', ordem: null });
+  assert.deepEqual(r.tarefa, { nome: 'Fundação', fase: 'Obra', responsavel: 'Ana', inicio: '2026-10-01', fim: '2026-10-05', progresso: 43, notas: 'n', checklist: [], tipo: 'tarefa', ordem: null, dependencias: [] });
 });
 
 test('ordenarTarefas ordena por início, depois fim, depois nome, sem alterar a entrada', () => {
@@ -395,4 +395,68 @@ test('histórico desfaz e refaz em ordem, limpa o refazer ao registrar e respeit
   assert.equal(h.desfazer('b'), null, 'limite de 2 descarta os mais antigos');
   h.limpar();
   assert.deepEqual(h.disponivel(), { desfazer: false, refazer: false });
+});
+
+test('validarTarefa normaliza dependências: id obrigatório, sem repetir, folga inteira limitada', () => {
+  const r = C.validarTarefa({ nome: 'A', inicio: HOJE, fim: HOJE, dependencias: [
+    { id: 'a', folga: '2' }, { id: 'a', folga: 5 }, { id: '' }, 'lixo', { id: 'b', folga: 9999 }, { id: 'c' },
+  ] });
+  assert.deepEqual(r.tarefa.dependencias, [{ id: 'a', folga: 2 }, { id: 'b', folga: 365 }, { id: 'c', folga: 0 }]);
+});
+
+test('importarDados descarta dependências para atividades inexistentes ou para si mesma', () => {
+  const r = C.importarDados(JSON.stringify({ tarefas: [
+    { id: 'a', nome: 'A', inicio: '2026-10-01', fim: '2026-10-02' },
+    { id: 'b', nome: 'B', inicio: '2026-10-03', fim: '2026-10-04', dependencias: [{ id: 'a' }, { id: 'sumiu' }, { id: 'b' }] },
+  ] }));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.dados.tarefas[1].dependencias, [{ id: 'a', folga: 0 }]);
+});
+
+test('importarDados recusa dependências em ciclo', () => {
+  const r = C.importarDados(JSON.stringify({ tarefas: [
+    { id: 'a', nome: 'Alicerce', inicio: '2026-10-01', fim: '2026-10-02', dependencias: [{ id: 'c' }] },
+    { id: 'b', nome: 'Blocos', inicio: '2026-10-03', fim: '2026-10-04', dependencias: [{ id: 'a' }] },
+    { id: 'c', nome: 'Cobertura', inicio: '2026-10-05', fim: '2026-10-06', dependencias: [{ id: 'b' }] },
+  ] }));
+  assert.equal(r.ok, false);
+  assert.match(r.erro, /ciclo/i);
+});
+
+test('sucessoresDe lista quem depende, direta ou indiretamente', () => {
+  const lista = [
+    tarefa({ id: 'a' }),
+    tarefa({ id: 'b', dependencias: [{ id: 'a', folga: 0 }] }),
+    tarefa({ id: 'c', dependencias: [{ id: 'b', folga: 0 }] }),
+    tarefa({ id: 'd' }),
+  ];
+  assert.deepEqual([...C.sucessoresDe(lista, 'a')].sort(), ['b', 'c']);
+  assert.deepEqual([...C.sucessoresDe(lista, 'd')], []);
+});
+
+test('reagendar empurra as seguintes em cadeia, mantendo a duração e respeitando a folga', () => {
+  const lista = [
+    tarefa({ id: 'a', inicio: '2026-10-01', fim: '2026-10-05' }),
+    tarefa({ id: 'b', inicio: '2026-10-03', fim: '2026-10-04', dependencias: [{ id: 'a', folga: 0 }] }),
+    tarefa({ id: 'c', inicio: '2026-10-05', fim: '2026-10-05', tipo: 'marco', dependencias: [{ id: 'b', folga: 2 }] }),
+  ];
+  const r = C.reagendar(lista);
+  const por = Object.fromEntries(r.tarefas.map((t) => [t.id, t]));
+  assert.deepEqual([por.b.inicio, por.b.fim], ['2026-10-06', '2026-10-07']);
+  assert.deepEqual([por.c.inicio, por.c.fim], ['2026-10-10', '2026-10-10']);
+  assert.deepEqual(r.movidas.sort(), ['b', 'c']);
+});
+
+test('reagendar não puxa para trás quem já está depois e usa a predecessora mais tardia', () => {
+  const lista = [
+    tarefa({ id: 'a', inicio: '2026-10-01', fim: '2026-10-02' }),
+    tarefa({ id: 'x', inicio: '2026-10-01', fim: '2026-10-08' }),
+    tarefa({ id: 'b', inicio: '2026-10-20', fim: '2026-10-21', dependencias: [{ id: 'a', folga: 0 }] }),
+    tarefa({ id: 'c', inicio: '2026-10-05', fim: '2026-10-06', dependencias: [{ id: 'a', folga: 0 }, { id: 'x', folga: -2 }] }),
+  ];
+  const r = C.reagendar(lista);
+  const por = Object.fromEntries(r.tarefas.map((t) => [t.id, t]));
+  assert.equal(por.b.inicio, '2026-10-20', 'folga existente é mantida');
+  assert.equal(por.c.inicio, '2026-10-07', 'x termina 08, folga -2: começa 07');
+  assert.deepEqual(r.movidas, ['c']);
 });

@@ -714,23 +714,23 @@ fs.mkdirSync(OUT, { recursive: true });
   await br.page.keyboard.press('ArrowRight');
   await br.page.keyboard.press('Shift+ArrowRight');
   await aguardarSalvo(br.page);
-  assert.equal(await datasDe('Testes e ajustes'), `${curta(19)} – ${curta(26)}`, 'setas movem e Shift muda o término');
+  assert.equal(await datasDe('Testes e ajustes'), `${curta(24)} – ${curta(31)}`, 'setas movem e Shift muda o término (já empurrada pelo Front-end)');
   await arrastarX(barraDe('Publicação no ar'), 36);
   await aguardarSalvo(br.page);
-  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(26)} · marco`), 'marco arrastado 1 dia');
+  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(33)} · marco`), 'marco arrastado 1 dia');
 
   await br.page.keyboard.press('Control+z');
   await aguardarSalvo(br.page);
-  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(25)} · marco`), 'Ctrl+Z desfaz o marco');
+  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(32)} · marco`), 'Ctrl+Z desfaz o marco');
   await br.page.click('#btn-desfazer');
   await aguardarSalvo(br.page);
-  assert.equal(await datasDe('Testes e ajustes'), `${curta(19)} – ${curta(25)}`, 'botão desfaz o Shift+seta');
+  assert.equal(await datasDe('Testes e ajustes'), `${curta(24)} – ${curta(30)}`, 'botão desfaz o Shift+seta');
   await br.page.click('#btn-refazer');
   await aguardarSalvo(br.page);
-  assert.equal(await datasDe('Testes e ajustes'), `${curta(19)} – ${curta(26)}`, 'refazer');
+  assert.equal(await datasDe('Testes e ajustes'), `${curta(24)} – ${curta(31)}`, 'refazer');
   await br.page.click('#btn-refazer');
   await aguardarSalvo(br.page);
-  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(26)} · marco`), 'refazer o marco');
+  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(33)} · marco`), 'refazer o marco');
   assert.equal(await br.page.isDisabled('#btn-refazer'), true, 'nada mais para refazer');
 
   await br.page.click(barraDe('Wireframes'));
@@ -751,10 +751,10 @@ fs.mkdirSync(OUT, { recursive: true });
   }, [sel, segurarMs, passos]);
   await tocar(barraDe('Divulgação'), 50, [20, 72]);
   await br.page.waitForTimeout(600);
-  assert.equal(await datasDe('Divulgação'), `${curta(26)} – ${curta(33)}`, 'deslizar sem segurar não move (é rolagem)');
+  assert.equal(await datasDe('Divulgação'), `${curta(34)} – ${curta(41)}`, 'deslizar sem segurar não move (é rolagem)');
   await tocar(barraDe('Divulgação'), 450, [20, 72]);
   await aguardarSalvo(br.page);
-  assert.equal(await datasDe('Divulgação'), `${curta(28)} – ${curta(35)}`, 'segurar e arrastar move pelo toque');
+  assert.equal(await datasDe('Divulgação'), `${curta(36)} – ${curta(43)}`, 'segurar e arrastar move pelo toque');
 
   await br.page.reload();
   await br.page.waitForSelector('body[data-tela="app"]');
@@ -769,6 +769,73 @@ fs.mkdirSync(OUT, { recursive: true });
   await br.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await br.page.waitForFunction(() => document.querySelector('#titulo').value === 'Editado em outro aparelho');
   assert.equal(await br.page.isDisabled('#btn-desfazer'), true, 'versão de outro aparelho zera o histórico');
+
+  // etapa 3: dependências com setas e reagendamento
+  const dp = await nova({ viewport: { width: 1366, height: 1400 } });
+  await entrar(dp.page, await novoServidor());
+  await dp.page.click('text=Ver um exemplo');
+  await aguardarSalvo(dp.page);
+  const datasDp = (nome) => dp.page.locator(`.g-linha:has(.g-nome-texto:text-is("${nome}")) .g-nome-datas`).textContent();
+  const abrirDp = async (nome) => {
+    await dp.page.click(`.g-nome-abrir:has(.g-nome-texto:text-is("${nome}"))`);
+    await dp.page.waitForSelector('#dialogo[open]');
+  };
+  assert.equal(await dp.page.locator('.g-seta').count(), 10, 'uma seta por dependência do exemplo');
+  await dp.page.screenshot({ path: path.join(OUT, '22-gantt-dependencias.png') });
+
+  // o editor não oferece quem formaria ciclo
+  await abrirDp('Levantamento de requisitos');
+  assert.equal(await dp.page.isDisabled('#btn-dependencia'), true, 'todas as outras dependem dela: nada a oferecer');
+  await dp.page.click('#dialogo [data-fechar].btn');
+  await abrirDp('Testes e ajustes');
+  assert.deepEqual(await dp.page.$$eval('#f-dependencias select', (s) => s.map((x) => x.selectedOptions[0].textContent)), ['Front-end', 'Back-end e integrações']);
+  await dp.page.click('#btn-dependencia');
+  const oferecidas = await dp.page.$$eval('#f-dependencias li:last-child select option', (o) => o.map((x) => x.textContent));
+  for (const proibida of ['Testes e ajustes', 'Publicação no ar', 'Divulgação', 'Front-end', 'Back-end e integrações']) {
+    assert.ok(!oferecidas.includes(proibida), `não oferece ${proibida}`);
+  }
+  await dp.page.click('#dialogo [data-fechar].btn');
+
+  // criar dependência pelo editor empurra a própria atividade
+  await abrirDp('Identidade visual');
+  await dp.page.click('#btn-dependencia');
+  await dp.page.selectOption('#f-dependencias li:last-child select', { label: 'Back-end e integrações' });
+  await dp.page.fill('#f-dependencias li:last-child input[type=number]', '1');
+  await dp.page.screenshot({ path: path.join(OUT, '23-editor-dependencias.png') });
+  await dp.page.click('#form-tarefa button[type=submit]');
+  await aguardarAnuncio(dp.page, 'As datas dela foram ajustadas');
+  assert.equal(await datasDp('Identidade visual'), `${curta(20)} – ${curta(28)}`, 'começa 1 dia depois do fim do back-end (18), mesma duração');
+  assert.equal(await dp.page.locator('.g-seta').count(), 11);
+
+  // arrastar uma predecessora empurra a cadeia, e desfazer volta tudo
+  await dp.page.click('[data-zoom=dia]');
+  const fe = '[data-barra][aria-label^="Front-end:"]';
+  await dp.page.locator(fe).scrollIntoViewIfNeeded();
+  const caixaFe = await dp.page.locator(fe).boundingBox();
+  await dp.page.mouse.move(caixaFe.x + caixaFe.width / 2, caixaFe.y + caixaFe.height / 2);
+  await dp.page.mouse.down();
+  for (let i = 1; i <= 6; i++) await dp.page.mouse.move(caixaFe.x + caixaFe.width / 2 + (72 * i) / 6, caixaFe.y + caixaFe.height / 2);
+  await dp.page.mouse.up();
+  await aguardarAnuncio(dp.page, '3 atividades seguintes foram reagendadas');
+  assert.equal(await datasDp('Testes e ajustes'), `${curta(20)} – ${curta(26)}`);
+  assert.match(await datasDp('Publicação no ar'), new RegExp(`^${curta(27)} · marco`));
+  assert.equal(await datasDp('Divulgação'), `${curta(28)} – ${curta(35)}`);
+  await dp.page.click('#toast button:has-text("Desfazer")');
+  await aguardarSalvo(dp.page);
+  assert.equal(await datasDp('Testes e ajustes'), `${curta(18)} – ${curta(24)}`, 'desfazer volta a cadeia inteira');
+  assert.equal(await datasDp('Front-end'), `${curta(3)} – ${curta(17)}`);
+
+  // lista mostra de quem depende; excluir remove os vínculos
+  await dp.page.click('[data-visao=tabela]');
+  assert.match(await dp.page.textContent('.tabela tr.linha-tarefa:has(.nome-link:has-text("Testes e ajustes")) .dependencias-resumo'), /depois de: Front-end, Back-end e integrações/);
+  await dp.page.click('[aria-label="Excluir Publicação no ar"]');
+  await aguardarSalvo(dp.page);
+  assert.equal(await dp.page.locator('.tabela tr.linha-tarefa:has(.nome-link:has-text("Divulgação")) .dependencias-resumo').count(), 0, 'Divulgação perdeu o vínculo com o marco excluído');
+  await dp.page.click('[data-visao=gantt]');
+  assert.equal(await dp.page.locator('.g-seta').count(), 9, 'setas do marco excluído somem');
+  await dp.page.reload();
+  await dp.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await dp.page.locator('.g-seta').count(), 9, 'vínculos ficaram no servidor');
 
   // sair volta para a tela de senha
   await page.click('#menu summary');
