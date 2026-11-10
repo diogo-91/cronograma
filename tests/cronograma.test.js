@@ -542,3 +542,58 @@ test('paraCSV com dias úteis exporta a duração útil', () => {
   assert.match(csv[0], /;Duração \(dias úteis\);/);
   assert.match(csv[1], /;5;/);
 });
+
+test('normalizarLinhaBase descarta lixo e guarda só id, início e término válidos', () => {
+  assert.equal(C.normalizarLinhaBase(null), null);
+  assert.equal(C.normalizarLinhaBase({ data: 'ontem', tarefas: [] }), null);
+  assert.equal(C.normalizarLinhaBase({ data: '2026-11-10', tarefas: 'x' }), null);
+  assert.deepEqual(C.normalizarLinhaBase({ data: '2026-11-10', tarefas: [
+    { id: 'a', inicio: '2026-11-09', fim: '2026-11-13', nome: 'ignorado' },
+    { id: 'b', inicio: '2026-11-13', fim: '2026-11-09' },
+    { id: 'c', inicio: 'lixo', fim: '2026-11-09' },
+    { id: 7, inicio: '2026-11-09', fim: '2026-11-09' },
+    { id: 'a', inicio: '2026-12-01', fim: '2026-12-02' },
+    null,
+  ] }), { data: '2026-11-10', tarefas: [{ id: 'a', inicio: '2026-11-09', fim: '2026-11-13' }] });
+});
+
+test('desvioLinhaBase mede quantos dias o término andou desde a linha de base', () => {
+  const plano = [tarefa({ id: 'a', inicio: '2026-11-09', fim: '2026-11-13' }), tarefa({ id: 'b', inicio: '2026-11-16', fim: '2026-11-20' })];
+  const base = C.criarLinhaBase(plano, '2026-11-10');
+  assert.equal(base.data, '2026-11-10');
+  assert.equal(C.desvioLinhaBase(plano[0], base), 0);
+  assert.equal(C.desvioLinhaBase({ ...plano[0], fim: '2026-11-17' }, base), 4, 'atrasou 4 dias corridos');
+  assert.equal(C.desvioLinhaBase({ ...plano[1], fim: '2026-11-18' }, base), -2, 'adiantou 2 dias');
+  assert.equal(C.desvioLinhaBase(tarefa({ id: 'nova' }), base), null, 'atividade criada depois da base');
+  assert.equal(C.desvioLinhaBase(plano[0], null), null);
+  const cal = { diasUteis: true, feriados: [{ data: '2026-11-16', nome: 'Ponte' }] };
+  assert.equal(C.desvioLinhaBase({ ...plano[0], fim: '2026-11-17' }, base, cal), 1, 'sexta → terça pulando fim de semana e feriado = 1 dia útil');
+  assert.equal(C.desvioLinhaBase({ ...plano[1], inicio: '2026-11-09', fim: '2026-11-13' }, base, cal), -4, 'sexta 20 → sexta 13 com feriado no meio = 4 dias úteis');
+});
+
+test('cargaPorResponsavel mostra o pico de atividades simultâneas por pessoa e semana', () => {
+  const tarefas = [
+    tarefa({ id: 'a', responsavel: 'Ana', inicio: '2026-11-09', fim: '2026-11-11' }),
+    tarefa({ id: 'b', responsavel: 'Ana', inicio: '2026-11-11', fim: '2026-11-13' }),
+    tarefa({ id: 'c', responsavel: 'Bruno', inicio: '2026-11-17', fim: '2026-11-18' }),
+    tarefa({ id: 'd', responsavel: '', inicio: '2026-11-10', fim: '2026-11-10' }),
+    tarefa({ id: 'm', responsavel: 'Bruno', tipo: 'marco', inicio: '2026-11-10', fim: '2026-11-10' }),
+  ];
+  const r = C.cargaPorResponsavel(tarefas);
+  assert.deepEqual(r.semanas, [{ inicio: '2026-11-09', fim: '2026-11-15' }, { inicio: '2026-11-16', fim: '2026-11-22' }]);
+  assert.deepEqual(r.pessoas.map((p) => p.nome), ['Ana', 'Bruno', ''], 'sem responsável por último; marco não ocupa ninguém');
+  assert.deepEqual(r.pessoas[0].celulas, [{ pico: 2, tarefas: ['a', 'b'] }, { pico: 0, tarefas: [] }]);
+  assert.deepEqual(r.pessoas[1].celulas, [{ pico: 0, tarefas: [] }, { pico: 1, tarefas: ['c'] }]);
+  assert.deepEqual(C.cargaPorResponsavel([]), { semanas: [], pessoas: [] });
+});
+
+test('cargaPorResponsavel com dias úteis ignora sobreposição em fim de semana e feriado', () => {
+  const tarefas = [
+    tarefa({ id: 'a', responsavel: 'Ana', inicio: '2026-11-12', fim: '2026-11-14' }),
+    tarefa({ id: 'b', responsavel: 'Ana', inicio: '2026-11-14', fim: '2026-11-15' }),
+    tarefa({ id: 'c', responsavel: 'Ana', inicio: '2026-11-13', fim: '2026-11-13' }),
+  ];
+  assert.equal(C.cargaPorResponsavel(tarefas).pessoas[0].celulas[0].pico, 2, 'sem calendário: a+c na sexta e a+b no sábado');
+  const cal = { diasUteis: true, feriados: [{ data: '2026-11-13', nome: 'X' }] };
+  assert.deepEqual(C.cargaPorResponsavel(tarefas, cal).pessoas[0].celulas, [{ pico: 1, tarefas: ['a'] }]);
+});

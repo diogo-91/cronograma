@@ -135,6 +135,7 @@ const Cronograma = (() => {
 
   const SEGUNDA_REFERENCIA = 4;
   const MAX_FERIADOS = 500;
+  const MAX_TAREFAS_LINHA_BASE = 5000;
   const cacheFeriados = new WeakMap();
 
   function normalizarCalendario(calendario) {
@@ -202,6 +203,67 @@ const Cronograma = (() => {
 
   function duracaoNoCalendario(tarefa, calendario) {
     return contarDiasUteis(diaNumero(tarefa.inicio), diaNumero(tarefa.fim), calendario);
+  }
+
+  function normalizarLinhaBase(linha) {
+    if (!linha || typeof linha !== 'object' || Number.isNaN(diaNumero(linha.data)) || !Array.isArray(linha.tarefas)) return null;
+    const porId = new Map();
+    for (const t of linha.tarefas) {
+      if (!t || typeof t.id !== 'string' || !t.id || t.id.length > 100 || porId.has(t.id)) continue;
+      const inicio = diaNumero(t.inicio);
+      const fim = diaNumero(t.fim);
+      if (Number.isNaN(inicio) || Number.isNaN(fim) || fim < inicio) continue;
+      porId.set(t.id, { id: t.id, inicio: t.inicio, fim: t.fim });
+    }
+    return { data: linha.data, tarefas: [...porId.values()].slice(0, MAX_TAREFAS_LINHA_BASE) };
+  }
+
+  function criarLinhaBase(tarefas, hoje) {
+    return { data: hoje, tarefas: tarefas.map((t) => ({ id: t.id, inicio: t.inicio, fim: t.fim })) };
+  }
+
+  function desvioLinhaBase(tarefa, linhaBase, calendario) {
+    const planejada = linhaBase?.tarefas.find((t) => t.id === tarefa.id);
+    if (!planejada) return null;
+    return indiceUtil(diaNumero(tarefa.fim) + 1, calendario) - indiceUtil(diaNumero(planejada.fim) + 1, calendario);
+  }
+
+  function cargaPorResponsavel(tarefas, calendario) {
+    const ocupacao = new Map();
+    let primeiro = Infinity;
+    let ultimo = -Infinity;
+    for (const t of tarefas) {
+      if (t.tipo === 'marco') continue;
+      const dias = ocupacao.get(t.responsavel) || new Map();
+      ocupacao.set(t.responsavel, dias);
+      for (let dia = diaNumero(t.inicio); dia <= diaNumero(t.fim); dia++) {
+        if (!diaUtil(dia, calendario)) continue;
+        if (!dias.has(dia)) dias.set(dia, []);
+        dias.get(dia).push(t.id);
+      }
+      primeiro = Math.min(primeiro, diaNumero(t.inicio));
+      ultimo = Math.max(ultimo, diaNumero(t.fim));
+    }
+    if (!ocupacao.size) return { semanas: [], pessoas: [] };
+    const segunda = primeiro - ((diaDaSemana(primeiro) + 6) % 7);
+    const semanas = [];
+    for (let inicio = segunda; inicio <= ultimo; inicio += 7) semanas.push({ inicio: isoDeDia(inicio), fim: isoDeDia(inicio + 6) });
+    const nomes = [...ocupacao.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'pt-BR'));
+    const pessoas = nomes.map((nome) => {
+      const dias = ocupacao.get(nome);
+      const celulas = semanas.map((_, i) => {
+        let pico = 0;
+        const ids = new Set();
+        for (let dia = segunda + i * 7; dia < segunda + i * 7 + 7; dia++) {
+          const doDia = dias.get(dia) || [];
+          pico = Math.max(pico, doDia.length);
+          for (const id of doDia) ids.add(id);
+        }
+        return { pico, tarefas: [...ids] };
+      });
+      return { nome, celulas };
+    });
+    return { semanas, pessoas };
   }
 
   function posicionarEm(tarefa, inicio, calendario) {
@@ -655,6 +717,10 @@ const Cronograma = (() => {
     normalizarCalendario,
     ehDiaUtil,
     duracaoNoCalendario,
+    normalizarLinhaBase,
+    criarLinhaBase,
+    desvioLinhaBase,
+    cargaPorResponsavel,
     feriadosNacionais,
     redimensionarTarefa,
     progressoPelaPosicao,

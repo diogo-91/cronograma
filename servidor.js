@@ -87,7 +87,7 @@ function nomeValido(valor) {
 }
 
 function novaEmpresa(nome, extras = {}) {
-  return { id: Cronograma.novoId(), nome, revisao: 0, idGravacao: null, tarefas: [], calendario: Cronograma.normalizarCalendario(), ...extras };
+  return { id: Cronograma.novoId(), nome, revisao: 0, idGravacao: null, tarefas: [], calendario: Cronograma.normalizarCalendario(), linhaBase: null, ...extras };
 }
 
 function lerEmpresas(texto) {
@@ -111,6 +111,7 @@ function lerEmpresas(texto) {
       idGravacao: idGravacaoValido(e.idGravacao),
       tarefas: r.dados.tarefas,
       calendario: Cronograma.normalizarCalendario(e.calendario),
+      linhaBase: Cronograma.normalizarLinhaBase(e.linhaBase),
     });
   }
   return { empresas };
@@ -310,7 +311,7 @@ function criarServidor({ senha, pastaDados }) {
   }
 
   function cronogramaDa(empresa) {
-    return { revisao: empresa.revisao, idGravacao: empresa.idGravacao, titulo: empresa.nome, tarefas: empresa.tarefas, calendario: empresa.calendario };
+    return { revisao: empresa.revisao, idGravacao: empresa.idGravacao, titulo: empresa.nome, tarefas: empresa.tarefas, calendario: empresa.calendario, linhaBase: empresa.linhaBase };
   }
 
   function listarEmpresas(res) {
@@ -345,6 +346,7 @@ function criarServidor({ senha, pastaDados }) {
       idGravacao: idGravacaoValido(corpo.idGravacao),
       tarefas: r.dados.tarefas,
       calendario: corpo.calendario === undefined ? empresa.calendario : Cronograma.normalizarCalendario(corpo.calendario),
+      linhaBase: corpo.linhaBase === undefined ? empresa.linhaBase : Cronograma.normalizarLinhaBase(corpo.linhaBase),
     };
     const { empresas } = armazenamento.atual();
     armazenamento.gravar({ empresas: empresas.map((e) => (e.id === id ? atualizada : e)) });

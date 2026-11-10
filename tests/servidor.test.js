@@ -71,7 +71,7 @@ test('cronograma novo começa vazio na revisão 0', async (t) => {
   const { cookie } = await entrar(base);
   const r = await api(base, cookie);
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { revisao: 0, idGravacao: null, titulo: 'Minha empresa', tarefas: [], calendario: { diasUteis: false, feriados: [] } });
+  assert.deepEqual(await r.json(), { revisao: 0, idGravacao: null, titulo: 'Minha empresa', tarefas: [], calendario: { diasUteis: false, feriados: [] }, linhaBase: null });
 });
 
 test('PUT grava, incrementa a revisão e persiste entre reinícios do servidor', async (t) => {
@@ -346,4 +346,17 @@ test('calendário da empresa é gravado, validado e mantido quando o envio não 
   assert.deepEqual(doc.calendario, { diasUteis: true, feriados: [{ data: '2026-12-25', nome: 'Natal' }] });
   await api(base, cookie, 'PUT', { revisaoBase: 1, titulo: 'x', tarefas: [] });
   assert.equal((await (await api(base, cookie)).json()).calendario.diasUteis, true, 'envio sem calendário não apaga o calendário');
+});
+
+test('linha de base da empresa é gravada, validada e mantida quando o envio não a traz', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  assert.equal((await (await api(base, cookie)).json()).linhaBase, null);
+  const linhaBase = { data: '2026-11-10', tarefas: [{ id: 'a', inicio: '2026-11-09', fim: '2026-11-13' }, { id: 'b', inicio: 'lixo', fim: 'x' }] };
+  assert.equal((await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'x', tarefas: [], linhaBase })).status, 200);
+  assert.deepEqual((await (await api(base, cookie)).json()).linhaBase, { data: '2026-11-10', tarefas: [{ id: 'a', inicio: '2026-11-09', fim: '2026-11-13' }] });
+  await api(base, cookie, 'PUT', { revisaoBase: 1, titulo: 'x', tarefas: [] });
+  assert.equal((await (await api(base, cookie)).json()).linhaBase.data, '2026-11-10', 'envio sem linha de base não a apaga');
+  await api(base, cookie, 'PUT', { revisaoBase: 2, titulo: 'x', tarefas: [], linhaBase: null });
+  assert.equal((await (await api(base, cookie)).json()).linhaBase, null, 'null remove a linha de base');
 });
