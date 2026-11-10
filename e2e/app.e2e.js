@@ -974,6 +974,41 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.equal(await lb.page.locator('.g-base').count(), 4, 'desfazer devolve a linha de base');
   await aguardarSalvo(lb.page);
 
+  // backup em JSON leva calendário e linha de base
+  const abrirCal = async () => { await lb.page.click('#menu summary'); await lb.page.click('[data-acao=calendario]'); };
+  await abrirCal();
+  await lb.page.check('#f-dias-uteis');
+  await lb.page.fill('#f-feriado-data', '2026-11-20');
+  await lb.page.fill('#f-feriado-nome', 'Consciência Negra');
+  await lb.page.click('#btn-feriado');
+  await lb.page.click('#form-calendario button[type=submit]');
+  await aguardarSalvo(lb.page);
+  await lb.page.click('#menu summary');
+  const [dlLb] = await Promise.all([lb.page.waitForEvent('download'), lb.page.click('[data-acao=exportar-json]')]);
+  const backupLb = path.join(OUT, 'backup-completo.json');
+  await dlLb.saveAs(backupLb);
+  const conteudoLb = JSON.parse(fs.readFileSync(backupLb, 'utf8'));
+  assert.equal(conteudoLb.calendario.feriados.length, 1);
+  assert.equal(conteudoLb.linhaBase.tarefas.length, 4);
+  await abrirCal();
+  await lb.page.uncheck('#f-dias-uteis');
+  await lb.page.click('.item-feriado .btn-icone');
+  await lb.page.click('#form-calendario button[type=submit]');
+  await lb.page.click('#menu summary');
+  await lb.page.click('[data-acao=remover-linha-base]');
+  await aguardarSalvo(lb.page);
+  assert.equal(await lb.page.locator('.g-base').count(), 0);
+  await lb.page.setInputFiles('#arquivo', backupLb);
+  await aguardarAnuncio(lb.page, '4 atividades importadas.');
+  await aguardarSalvo(lb.page);
+  await lb.page.reload();
+  await lb.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await lb.page.locator('.g-base').count(), 4, 'linha de base voltou do backup e ficou no servidor');
+  await abrirCal();
+  assert.equal(await lb.page.isChecked('#f-dias-uteis'), true, 'calendário voltou do backup');
+  assert.equal(await lb.page.textContent('#f-feriados-total'), '1 feriado');
+  await lb.page.click('[data-fechar-calendario].btn');
+
   // sair volta para a tela de senha
   await page.click('#menu summary');
   await page.click('[data-acao=sair]');

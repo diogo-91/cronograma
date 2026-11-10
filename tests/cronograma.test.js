@@ -597,3 +597,14 @@ test('cargaPorResponsavel com dias úteis ignora sobreposição em fim de semana
   const cal = { diasUteis: true, feriados: [{ data: '2026-11-13', nome: 'X' }] };
   assert.deepEqual(C.cargaPorResponsavel(tarefas, cal).pessoas[0].celulas, [{ pico: 1, tarefas: ['a'] }]);
 });
+
+test('importarDados traz calendário e linha de base do backup, validados', () => {
+  const r = C.importarDados(JSON.stringify({ titulo: 'Obra', tarefas: [{ id: 'a', nome: 'A', inicio: '2026-11-09', fim: '2026-11-13' }],
+    calendario: { diasUteis: true, feriados: [{ data: '2026-11-20', nome: 'Consciência Negra' }, { data: 'lixo' }] },
+    linhaBase: { data: '2026-11-01', tarefas: [{ id: 'a', inicio: '2026-11-02', fim: '2026-11-06' }, { id: 'b', inicio: 'x', fim: 'y' }] } }));
+  assert.deepEqual(r.dados.calendario, { diasUteis: true, feriados: [{ data: '2026-11-20', nome: 'Consciência Negra' }] });
+  assert.deepEqual(r.dados.linhaBase, { data: '2026-11-01', tarefas: [{ id: 'a', inicio: '2026-11-02', fim: '2026-11-06' }] });
+  const antigo = C.importarDados(JSON.stringify({ tarefas: [] }));
+  assert.equal(antigo.dados.calendario, null, 'backup antigo sem calendário não impõe um');
+  assert.equal(antigo.dados.linhaBase, null);
+});

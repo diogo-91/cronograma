@@ -35,7 +35,7 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 - **Lista** em tabela no computador e em cartões no celular, com duplicar e excluir (com "Desfazer").
 - Resumo com progresso geral ponderado pela duração, contagem por status e período total.
 - Busca (ignora acentos e maiúsculas) e filtros por fase e status.
-- **Arquivo:** backup em JSON (exportar/importar), exportação CSV para Excel (separador `;`, datas dd/mm/aaaa), impressão / PDF e Sair.
+- **Arquivo:** backup em JSON (exportar/importar; leva atividades, calendário com feriados e linha de base — backup antigo, sem calendário, mantém o calendário atual), exportação CSV para Excel (separador `;`, datas dd/mm/aaaa), impressão / PDF e Sair.
 - Tema claro, com a marca GoldSystem no topo e no ícone da aba.
 
 ## Onde ficam os dados

@@ -684,7 +684,15 @@ const Cronograma = (() => {
     for (const t of tarefas) t.dependencias = t.dependencias.filter((d) => d.id !== t.id && ids.has(d.id));
     const ciclo = encontrarCiclo(tarefas);
     if (ciclo) return { ok: false, erro: `As dependências formam um ciclo: ${ciclo.join(' → ')}.` };
-    return { ok: true, dados: { titulo: texto(bruto.titulo) || 'Meu cronograma', tarefas } };
+    return {
+      ok: true,
+      dados: {
+        titulo: texto(bruto.titulo) || 'Meu cronograma',
+        tarefas,
+        calendario: bruto.calendario === undefined ? null : normalizarCalendario(bruto.calendario),
+        linhaBase: normalizarLinhaBase(bruto.linhaBase),
+      },
+    };
   }
 
   function iniciais(nome) {

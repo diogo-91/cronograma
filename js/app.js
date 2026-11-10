@@ -1478,10 +1478,12 @@
     render();
   }
 
-  function substituirTudo(titulo, tarefas) {
+  function substituirTudo(titulo, tarefas, { calendario = estado.calendario, linhaBase = estado.linhaBase } = {}) {
     registrarHistorico();
     estado.titulo = titulo;
     estado.tarefas = comOrdem(tarefas);
+    estado.calendario = calendario;
+    estado.linhaBase = linhaBase;
     zerarFiltros();
     rolarParaHoje = true;
     const gravacao = salvar();
@@ -1562,12 +1564,14 @@
       return;
     }
     if (estado.tarefas.length && !confirm(`Substituir o cronograma atual (${estado.tarefas.length} atividades) pelo conteúdo de "${arquivo.name}"?`)) return;
-    substituirTudo(estado.titulo, r.dados.tarefas).then((ok) => ok && avisar(`${r.dados.tarefas.length} atividades importadas.`));
+    const { calendario, linhaBase } = r.dados;
+    substituirTudo(estado.titulo, r.dados.tarefas, { calendario: calendario || estado.calendario, linhaBase })
+      .then((ok) => ok && avisar(`${r.dados.tarefas.length} atividades importadas.`));
   }
 
   const acoesMenu = {
     'exportar-json': () =>
-      baixar(`${nomeArquivo()}.json`, JSON.stringify({ versao: 1, titulo: estado.titulo, tarefas: C.ordenarTarefas(estado.tarefas) }, null, 2), 'application/json'),
+      baixar(`${nomeArquivo()}.json`, JSON.stringify({ versao: 2, titulo: estado.titulo, tarefas: C.ordenarTarefas(estado.tarefas), calendario: estado.calendario, linhaBase: estado.linhaBase }, null, 2), 'application/json'),
     'importar-json': () => $('#arquivo').click(),
     'exportar-csv': () => baixar(`${nomeArquivo()}.csv`, C.paraCSV(C.ordenarTarefas(estado.tarefas), C.hojeISO(), estado.calendario), 'text/csv;charset=utf-8'),
     imprimir: () => window.print(),
