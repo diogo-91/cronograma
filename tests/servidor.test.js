@@ -71,7 +71,7 @@ test('cronograma novo começa vazio na revisão 0', async (t) => {
   const { cookie } = await entrar(base);
   const r = await api(base, cookie);
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { revisao: 0, idGravacao: null, titulo: 'Minha empresa', tarefas: [] });
+  assert.deepEqual(await r.json(), { revisao: 0, idGravacao: null, titulo: 'Minha empresa', tarefas: [], calendario: { diasUteis: false, feriados: [] } });
 });
 
 test('PUT grava, incrementa a revisão e persiste entre reinícios do servidor', async (t) => {
@@ -335,4 +335,15 @@ test('servidor recusa dependências em ciclo', async (t) => {
   ] });
   assert.equal(r.status, 400);
   assert.match((await r.json()).erro, /ciclo/);
+});
+
+test('calendário da empresa é gravado, validado e mantido quando o envio não o traz', async (t) => {
+  const { base } = await subir(t);
+  const { cookie } = await entrar(base);
+  const calendario = { diasUteis: true, feriados: [{ data: '2026-12-25', nome: 'Natal' }, { data: 'lixo' }] };
+  assert.equal((await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'x', tarefas: [], calendario })).status, 200);
+  const doc = await (await api(base, cookie)).json();
+  assert.deepEqual(doc.calendario, { diasUteis: true, feriados: [{ data: '2026-12-25', nome: 'Natal' }] });
+  await api(base, cookie, 'PUT', { revisaoBase: 1, titulo: 'x', tarefas: [] });
+  assert.equal((await (await api(base, cookie)).json()).calendario.diasUteis, true, 'envio sem calendário não apaga o calendário');
 });

@@ -460,3 +460,85 @@ test('reagendar não puxa para trás quem já está depois e usa a predecessora 
   assert.equal(por.c.inicio, '2026-10-07', 'x termina 08, folga -2: começa 07');
   assert.deepEqual(r.movidas, ['c']);
 });
+
+const UTEIS = { diasUteis: true, feriados: [] };
+
+test('normalizarCalendario valida, ordena e tira repetidos dos feriados', () => {
+  const c = C.normalizarCalendario({ diasUteis: 'sim', feriados: [
+    { data: '2026-12-25', nome: ' Natal ' }, { data: '2026-01-01' }, { data: '2026-12-25', nome: 'outro' }, { data: 'xx' }, 'lixo',
+  ] });
+  assert.deepEqual(c, { diasUteis: false, feriados: [{ data: '2026-01-01', nome: '' }, { data: '2026-12-25', nome: 'Natal' }] });
+  assert.deepEqual(C.normalizarCalendario(undefined), { diasUteis: false, feriados: [] });
+  assert.equal(C.normalizarCalendario({ diasUteis: true }).diasUteis, true);
+});
+
+test('ehDiaUtil considera fim de semana e feriado só com o calendário ligado', () => {
+  const comFeriado = { diasUteis: true, feriados: [{ data: '2026-11-02', nome: 'Finados' }] };
+  assert.equal(C.ehDiaUtil('2026-11-07', { diasUteis: false, feriados: [] }), true, 'sábado conta sem calendário');
+  assert.equal(C.ehDiaUtil('2026-11-07', UTEIS), false, 'sábado');
+  assert.equal(C.ehDiaUtil('2026-11-02', comFeriado), false, 'feriado');
+  assert.equal(C.ehDiaUtil('2026-11-03', comFeriado), true, 'terça');
+});
+
+test('duracaoNoCalendario conta só dias úteis quando ligado', () => {
+  const semana = tarefa({ inicio: '2026-11-02', fim: '2026-11-08' });
+  assert.equal(C.duracaoNoCalendario(semana, { diasUteis: false, feriados: [] }), 7);
+  assert.equal(C.duracaoNoCalendario(semana, UTEIS), 5);
+  assert.equal(C.duracaoNoCalendario(semana, { diasUteis: true, feriados: [{ data: '2026-11-02', nome: '' }] }), 4);
+});
+
+test('deslocarTarefa com dias úteis para no sentido do movimento e mantém a duração útil', () => {
+  const quintaSexta = tarefa({ inicio: '2026-11-05', fim: '2026-11-06' });
+  const mais1 = C.deslocarTarefa(quintaSexta, 1, UTEIS);
+  assert.deepEqual([mais1.inicio, mais1.fim], ['2026-11-06', '2026-11-09'], 'sexta e segunda');
+  const mais2 = C.deslocarTarefa(quintaSexta, 2, UTEIS);
+  assert.deepEqual([mais2.inicio, mais2.fim], ['2026-11-09', '2026-11-10'], 'sábado vira segunda');
+  const voltar = C.deslocarTarefa(tarefa({ inicio: '2026-11-09', fim: '2026-11-10' }), -1, UTEIS);
+  assert.deepEqual([voltar.inicio, voltar.fim], ['2026-11-06', '2026-11-09'], 'domingo vira sexta ao voltar');
+});
+
+test('redimensionarTarefa com dias úteis pula o fim de semana no sentido do arraste', () => {
+  const ateSexta = tarefa({ inicio: '2026-11-02', fim: '2026-11-06' });
+  assert.equal(C.redimensionarTarefa(ateSexta, 'fim', 1, UTEIS).fim, '2026-11-09');
+  assert.equal(C.redimensionarTarefa(tarefa({ inicio: '2026-11-02', fim: '2026-11-09' }), 'fim', -1, UTEIS).fim, '2026-11-06');
+});
+
+test('reagendar com dias úteis começa no próximo dia útil e respeita folga e feriado', () => {
+  const lista = (folga, feriados = []) => [
+    tarefa({ id: 'a', inicio: '2026-11-02', fim: '2026-11-06' }),
+    tarefa({ id: 'b', inicio: '2026-11-03', fim: '2026-11-04', dependencias: [{ id: 'a', folga }] }),
+  ];
+  const b = (r) => r.tarefas.find((t) => t.id === 'b');
+  assert.deepEqual([b(C.reagendar(lista(0), UTEIS)).inicio, b(C.reagendar(lista(0), UTEIS)).fim], ['2026-11-09', '2026-11-10']);
+  assert.equal(b(C.reagendar(lista(1), UTEIS)).inicio, '2026-11-10');
+  const comFeriado = { diasUteis: true, feriados: [{ data: '2026-11-09', nome: '' }] };
+  assert.deepEqual([b(C.reagendar(lista(0), comFeriado)).inicio, b(C.reagendar(lista(0), comFeriado)).fim], ['2026-11-10', '2026-11-11']);
+  assert.equal(b(C.reagendar(lista(-1), UTEIS)).inicio, '2026-11-06', 'folga -1: um dia útil antes de segunda');
+  assert.equal(b(C.reagendar(lista(0))).inicio, '2026-11-07', 'sem calendário segue corrido');
+});
+
+test('caminhoCritico marca quem não tem folga até o fim do projeto', () => {
+  const lista = [
+    tarefa({ id: 'a', inicio: '2026-11-02', fim: '2026-11-06' }),
+    tarefa({ id: 'b', inicio: '2026-11-09', fim: '2026-11-13', dependencias: [{ id: 'a', folga: 0 }] }),
+    tarefa({ id: 'c', inicio: '2026-11-02', fim: '2026-11-03' }),
+    tarefa({ id: 'd', inicio: '2026-11-09', fim: '2026-11-09', dependencias: [{ id: 'a', folga: 0 }] }),
+  ];
+  assert.deepEqual([...C.caminhoCritico(lista, UTEIS)].sort(), ['a', 'b']);
+  assert.deepEqual([...C.caminhoCritico(lista)].sort(), ['b'], 'em dias corridos, A tem o fim de semana de folga');
+  assert.deepEqual([...C.caminhoCritico([])], []);
+});
+
+test('feriadosNacionais traz os fixos e a Sexta-feira Santa pela Páscoa', () => {
+  const f2026 = C.feriadosNacionais(2026);
+  assert.equal(f2026.length, 10);
+  assert.ok(f2026.some((f) => f.data === '2026-04-03' && /Sexta-feira Santa/.test(f.nome)), 'Páscoa 2026 é 5 de abril');
+  assert.ok(f2026.some((f) => f.data === '2026-11-20'));
+  assert.ok(C.feriadosNacionais(2025).some((f) => f.data === '2025-04-18'), 'Páscoa 2025 é 20 de abril');
+});
+
+test('paraCSV com dias úteis exporta a duração útil', () => {
+  const csv = C.paraCSV([tarefa({ nome: 'A', inicio: '2026-11-02', fim: '2026-11-08' })], HOJE, UTEIS).replace(/^﻿/, '').split('\r\n');
+  assert.match(csv[0], /;Duração \(dias úteis\);/);
+  assert.match(csv[1], /;5;/);
+});

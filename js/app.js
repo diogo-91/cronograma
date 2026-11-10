@@ -60,7 +60,10 @@
     filtros: { texto: '', fase: '', status: '' },
     editando: null,
     recolhidas: new Set(),
+    calendario: C.normalizarCalendario(),
+    critico: false,
   };
+  let feriadosEditados = [];
   let rolarParaHoje = true;
   let hojeNoGantt = null;
   let duracaoEditada = 7;
@@ -155,25 +158,30 @@
     revisao = doc.revisao;
     estado.titulo = doc.titulo;
     estado.tarefas = comOrdem(doc.tarefas);
+    estado.calendario = C.normalizarCalendario(doc.calendario);
     historico.limpar();
   }
 
+  function fotografia() {
+    return structuredClone({ tarefas: estado.tarefas, calendario: estado.calendario });
+  }
+
   function registrarHistorico() {
-    historico.registrar(structuredClone(estado.tarefas));
+    historico.registrar(fotografia());
   }
 
   function voltarNoHistorico(direcao) {
-    const atual = structuredClone(estado.tarefas);
-    const restaurado = direcao === 'desfazer' ? historico.desfazer(atual) : historico.refazer(atual);
+    const restaurado = direcao === 'desfazer' ? historico.desfazer(fotografia()) : historico.refazer(fotografia());
     if (!restaurado) return;
-    estado.tarefas = restaurado;
+    estado.tarefas = restaurado.tarefas;
+    estado.calendario = restaurado.calendario;
     salvar();
     render();
     avisar(direcao === 'desfazer' ? 'Alteração desfeita.' : 'Alteração refeita.');
   }
 
   function reagendarSeguintes() {
-    const { tarefas, movidas } = C.reagendar(estado.tarefas);
+    const { tarefas, movidas } = C.reagendar(estado.tarefas, estado.calendario);
     estado.tarefas = tarefas;
     return movidas;
   }
@@ -189,6 +197,58 @@
     estado.tarefas[indice] = nova;
     const reagendadas = reagendarSeguintes().filter((id) => id !== nova.id).length;
     salvar().then((ok) => ok && reagendadas && avisar(textoReagendadas(reagendadas), { rotulo: 'Desfazer', executar: () => voltarNoHistorico('desfazer') }));
+    render();
+  }
+
+  function rotuloDuracao(tarefa) {
+    const corridos = C.duracaoDias(tarefa);
+    if (!estado.calendario.diasUteis) return `${corridos} ${corridos === 1 ? 'dia' : 'dias'}`;
+    const uteis = C.duracaoNoCalendario(tarefa, estado.calendario);
+    return `${uteis} ${uteis === 1 ? 'dia útil' : 'dias úteis'}`;
+  }
+
+  function abrirCalendario() {
+    $('#f-dias-uteis').checked = estado.calendario.diasUteis;
+    feriadosEditados = estado.calendario.feriados.map((f) => ({ ...f }));
+    const ano = Number(C.hojeISO().slice(0, 4));
+    $('#f-ano-feriados').replaceChildren(...[ano, ano + 1, ano + 2].map((a) => el('option', { value: String(a) }, String(a))));
+    $('#f-feriado-data').value = '';
+    $('#f-feriado-nome').value = '';
+    $('#e-feriado').textContent = '';
+    renderFeriados();
+    $('#dialogo-calendario').showModal();
+  }
+
+  function renderFeriados() {
+    feriadosEditados = C.normalizarCalendario({ feriados: feriadosEditados }).feriados;
+    $('#f-feriados-total').textContent = feriadosEditados.length ? `${feriadosEditados.length} ${feriadosEditados.length === 1 ? 'feriado' : 'feriados'}` : 'nenhum';
+    $('#f-feriados').replaceChildren(...feriadosEditados.map((f, i) => el('li', { class: 'item-checklist item-feriado' },
+      el('span', { class: 'feriado-data' }, `${C.formatarData(f.data)} · ${['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][new Date(`${f.data}T12:00:00Z`).getUTCDay()]}`),
+      el('span', { class: 'feriado-nome' }, f.nome || 'Feriado'),
+      el('button', {
+        type: 'button',
+        class: 'btn-icone',
+        title: 'Remover feriado',
+        'aria-label': `Remover feriado de ${C.formatarData(f.data)}`,
+        onclick: () => {
+          feriadosEditados.splice(i, 1);
+          renderFeriados();
+        },
+      }, icone('remover')))));
+  }
+
+  function salvarCalendario(evento) {
+    evento.preventDefault();
+    const novo = C.normalizarCalendario({ diasUteis: $('#f-dias-uteis').checked, feriados: feriadosEditados });
+    $('#dialogo-calendario').close();
+    if (JSON.stringify(novo) === JSON.stringify(estado.calendario)) return;
+    registrarHistorico();
+    estado.calendario = novo;
+    const reagendadas = reagendarSeguintes().length;
+    salvar().then((ok) => ok && avisar(
+      reagendadas ? `Calendário salvo. ${textoReagendadas(reagendadas)}` : 'Calendário salvo.',
+      { rotulo: 'Desfazer', executar: () => voltarNoHistorico('desfazer') },
+    ));
     render();
   }
 
@@ -249,7 +309,7 @@
     if (focar != null) lista.querySelectorAll('select')[focar]?.focus();
   }
 
-  function desenharSetas(grade) {
+  function desenharSetas(grade, criticas) {
     grade.querySelector('.g-setas')?.remove();
     const caixa = grade.getBoundingClientRect();
     const barras = new Map([...grade.querySelectorAll('[data-barra]')].map((b) => [b.dataset.barra, b.getBoundingClientRect()]));
@@ -266,7 +326,10 @@
     ponta.setAttribute('d', 'M0 0L8 4L0 8z');
     ponta.setAttribute('class', 'g-seta-ponta');
     marcador.append(ponta);
-    defs.append(marcador);
+    const marcadorCritico = marcador.cloneNode(true);
+    marcadorCritico.setAttribute('id', 'ponta-seta-critica');
+    marcadorCritico.firstChild.setAttribute('class', 'g-seta-ponta critica');
+    defs.append(marcador, marcadorCritico);
     svg.append(defs);
     for (const t of estado.tarefas) {
       const b = barras.get(t.id);
@@ -284,8 +347,9 @@
           : `M${x1} ${y1}H${x1 + 5}V${desce ? b.top - caixa.top - 6 : b.bottom - caixa.top + 6}H${x2 - 10}V${y2}H${x2 - 1}`;
         const caminho = document.createElementNS(svgNs, 'path');
         caminho.setAttribute('d', rota);
-        caminho.setAttribute('class', 'g-seta');
-        caminho.setAttribute('marker-end', 'url(#ponta-seta)');
+        const critica = criticas.has(t.id) && criticas.has(d.id);
+        caminho.setAttribute('class', critica ? 'g-seta critica' : 'g-seta');
+        caminho.setAttribute('marker-end', critica ? 'url(#ponta-seta-critica)' : 'url(#ponta-seta)');
         caminho.setAttribute('data-de', d.id);
         caminho.setAttribute('data-para', t.id);
         svg.append(caminho);
@@ -298,7 +362,7 @@
     if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
     ev.preventDefault();
     const dias = ev.key === 'ArrowRight' ? 1 : -1;
-    const nova = ev.shiftKey ? C.redimensionarTarefa(tarefa, 'fim', dias) : C.deslocarTarefa(tarefa, dias);
+    const nova = ev.shiftKey ? C.redimensionarTarefa(tarefa, 'fim', dias, estado.calendario) : C.deslocarTarefa(tarefa, dias, estado.calendario);
     if (nova === tarefa) return;
     aplicarAlteracaoTarefa(nova);
     [...document.querySelectorAll('[data-barra]')].find((b) => b.dataset.barra === tarefa.id)?.focus();
@@ -352,7 +416,7 @@
         return;
       }
       const dias = Math.round(dx / pxDia);
-      resultado = modo === 'mover' ? C.deslocarTarefa(tarefa, dias) : C.redimensionarTarefa(tarefa, modo, dias);
+      resultado = modo === 'mover' ? C.deslocarTarefa(tarefa, dias, estado.calendario) : C.redimensionarTarefa(tarefa, modo, dias, estado.calendario);
       const deslocamento = (C.diaNumero(resultado.inicio) - C.diaNumero(tarefa.inicio)) * pxDia;
       barra.style.setProperty('left', `${leftOriginal + deslocamento}px`);
       if (!marco) barra.style.setProperty('width', `${C.duracaoDias(resultado) * pxDia}px`);
@@ -477,6 +541,7 @@
     }
     if (VISOES.includes(prefs.visao)) estado.visao = prefs.visao;
     if (ZOOMS.includes(prefs.zoom)) estado.zoom = prefs.zoom;
+    estado.critico = prefs.critico === true;
     if (typeof prefs.empresa === 'string') empresaPreferida = prefs.empresa;
     if (prefs.recolhidas && typeof prefs.recolhidas === 'object') recolhidasPorEmpresa = prefs.recolhidas;
   }
@@ -505,7 +570,7 @@
     aguardandoEnvio = [];
     const idGravacao = C.novoId();
     const geracao = geracaoSessao;
-    const corpo = JSON.stringify({ revisaoBase: revisao, idGravacao, titulo: estado.titulo, tarefas: estado.tarefas });
+    const corpo = JSON.stringify({ revisaoBase: revisao, idGravacao, titulo: estado.titulo, tarefas: estado.tarefas, calendario: estado.calendario });
     const manterViva = aoSair && new TextEncoder().encode(corpo).length < LIMITE_ENVIO_AO_SAIR;
     gravacoesSemResposta.add(idGravacao);
     const r = await chamarApi('PUT', `api/empresas/${empresaAtual}`, corpo, { keepalive: manterViva });
@@ -599,7 +664,7 @@
 
   function salvarPrefs() {
     if (empresaAtual) recolhidasPorEmpresa[empresaAtual] = [...estado.recolhidas];
-    gravar(CHAVE_PREFS, JSON.stringify({ visao: estado.visao, zoom: estado.zoom, empresa: empresaAtual, recolhidas: recolhidasPorEmpresa }));
+    gravar(CHAVE_PREFS, JSON.stringify({ visao: estado.visao, zoom: estado.zoom, critico: estado.critico, empresa: empresaAtual, recolhidas: recolhidasPorEmpresa }));
   }
 
   function avisar(mensagem, acao) {
@@ -651,7 +716,7 @@
         el('div', { class: 'cartao-rotulo' }, rotulo),
         el('div', { class: 'cartao-valor' }, String(valor)));
     const periodo = r.inicio
-      ? [el('span', {}, `${C.formatarData(r.inicio)} a ${C.formatarData(r.fim)}`), ' · ', el('span', {}, `${r.dias} ${r.dias === 1 ? 'dia' : 'dias'} corridos`)]
+      ? [el('span', {}, `${C.formatarData(r.inicio)} a ${C.formatarData(r.fim)}`), ' · ', el('span', {}, `${r.dias} ${r.dias === 1 ? 'dia' : 'dias'} corridos`), ...(estado.calendario.diasUteis && r.inicio ? [' · ', el('span', {}, rotuloDuracao({ inicio: r.inicio, fim: r.fim }))] : [])]
       : ['Sem atividades'];
     $('#resumo').replaceChildren(
       el('div', { class: 'cartao cartao-progresso' },
@@ -829,6 +894,8 @@
 
   function renderGantt(lista, cores, hoje, podeArrastar) {
     const e = C.escalaGantt(lista, estado.zoom, hoje);
+    const criticas = estado.critico ? C.caminhoCritico(estado.tarefas, estado.calendario) : new Set();
+    $('#btn-critico').setAttribute('aria-pressed', String(estado.critico));
     const px = (n) => `${n}px`;
     hojeNoGantt = e.hojeLeft === null ? null : e.hojeLeft + e.pxDia / 2;
     for (const b of document.querySelectorAll('[data-zoom]')) {
@@ -841,6 +908,10 @@
     for (const divisao of e.zoom === 'mes' ? e.meses : e.marcas) {
       if (divisao.fimDeSemana) fundo.append(el('div', { class: 'g-fds', style: { left: px(divisao.left), width: px(divisao.width) } }));
       fundo.append(el('div', { class: 'g-linha-v', style: { left: px(divisao.left) } }));
+    }
+    for (const f of estado.calendario.diasUteis ? estado.calendario.feriados : []) {
+      const dia = C.diaNumero(f.data) - e.inicioDia;
+      if (dia >= 0 && dia < e.totalDias) fundo.append(el('div', { class: 'g-fds g-feriado', title: f.nome || 'Feriado', style: { left: px(dia * e.pxDia), width: px(e.pxDia) } }));
     }
     if (hojeNoGantt !== null) fundo.append(el('div', { class: 'g-hoje', style: { left: px(hojeNoGantt) } }));
 
@@ -870,7 +941,7 @@
       const desenho = marco
         ? el('button', {
             type: 'button',
-            class: `g-marco ${status}`,
+            class: `g-marco ${status}${criticas.has(t.id) ? ' critica' : ''}`,
             style: { left: px(barra.left + e.pxDia / 2) },
             title: `${descricao}. Arraste para mudar a data.`,
             'aria-label': `${descricao}. Setas para os lados mudam a data.`,
@@ -883,7 +954,7 @@
           el('span', { class: 'g-rotulo' }, status === 'atrasada' ? `${dataCurta(t.inicio)} · atrasado` : dataCurta(t.inicio)))
         : el('button', {
             type: 'button',
-            class: `g-barra ${status}`,
+            class: `g-barra ${status}${criticas.has(t.id) ? ' critica' : ''}`,
             style: { left: px(barra.left), width: px(barra.width) },
             title: `${descricao}. Arraste para mover; puxe as pontas para mudar as datas.`,
             'aria-label': `${descricao}. Setas para os lados movem 1 dia; com Shift, mudam o término.`,
@@ -941,9 +1012,9 @@
         ...linhas),
     );
     const grade = caixaGantt.querySelector('.g-grade');
-    desenharSetas(grade);
+    desenharSetas(grade, criticas);
     observadorSetas?.disconnect();
-    observadorSetas = new ResizeObserver(() => desenharSetas(grade));
+    observadorSetas = new ResizeObserver(() => desenharSetas(grade, criticas));
     observadorSetas.observe(grade);
     $('#btn-hoje').disabled = hojeNoGantt === null;
     if (rolarParaHoje) {
@@ -965,11 +1036,12 @@
   }
 
   function renderTabela(lista, cores, hoje, podeArrastar) {
+    const criticas = estado.critico ? C.caminhoCritico(estado.tarefas, estado.calendario) : new Set();
     const celula = (rotulo, valor, classe) => el('td', { 'data-rotulo': rotulo, class: valor ? classe : `${classe} vazio-celula` }, valor || '—');
     const linhaTarefa = (t) => {
       const status = C.statusTarefa(t, hoje);
-      const dias = C.duracaoDias(t);
       const marco = t.tipo === 'marco';
+      const critica = criticas.has(t.id);
       return el('tr', { class: 'linha-tarefa', style: { '--cor': corDa(t, cores) }, 'data-arrastavel': 'tarefa', 'data-id': t.id, 'data-fase': t.fase },
         el('td', { class: 'c-nome' },
           el('div', { class: 'nome-linha' },
@@ -987,12 +1059,12 @@
             : '—'),
         celula(marco ? 'Data' : 'Início', C.formatarData(t.inicio), 'data c-inicio'),
         marco ? el('td', { class: 'data c-fim vazio-celula' }, '—') : celula('Término', C.formatarData(t.fim), 'data c-fim'),
-        celula('Duração', marco ? 'Marco' : `${dias} ${dias === 1 ? 'dia' : 'dias'}`, 'num c-dur'),
+        celula('Duração', marco ? 'Marco' : rotuloDuracao(t), 'num c-dur'),
         el('td', { class: 'c-progresso' },
           marco
             ? el('span', { class: 'marco-situacao' }, t.progresso >= 100 ? 'Marco concluído' : 'Marco pendente')
             : el('div', { class: 'progresso-celula' }, el('div', { class: 'medidor' }, el('span', { style: { width: `${t.progresso}%` } })), el('b', {}, `${t.progresso}%`))),
-        el('td', { class: 'c-status' }, el('span', { class: `selo ${status}` }, C.ROTULO_STATUS[status])),
+        el('td', { class: 'c-status' }, el('span', { class: `selo ${status}` }, C.ROTULO_STATUS[status]), critica && el('span', { class: 'selo critica' }, 'Crítica')),
         el('td', { class: 'c-acoes' },
           el('div', { class: 'acoes-linha' },
             el('button', { type: 'button', class: 'btn-icone', title: 'Duplicar', 'aria-label': `Duplicar ${t.nome}`, onclick: () => duplicar(t.id) }, icone('duplicar')),
@@ -1195,7 +1267,8 @@
     const inicio = C.diaNumero(form.elements.inicio.value);
     const fim = C.diaNumero(form.elements.fim.value);
     const dias = fim - inicio + 1;
-    $('#f-duracao').textContent = dias >= 1 ? `Duração: ${dias} ${dias === 1 ? 'dia' : 'dias'} corridos` : '';
+    const uteis = estado.calendario.diasUteis && dias >= 1 ? ` (${rotuloDuracao({ inicio: form.elements.inicio.value, fim: form.elements.fim.value })})` : '';
+    $('#f-duracao').textContent = dias >= 1 ? `Duração: ${dias} ${dias === 1 ? 'dia' : 'dias'} corridos${uteis}` : '';
     if (dias >= 1) duracaoEditada = dias;
   }
 
@@ -1404,13 +1477,14 @@
     'exportar-json': () =>
       baixar(`${nomeArquivo()}.json`, JSON.stringify({ versao: 1, titulo: estado.titulo, tarefas: C.ordenarTarefas(estado.tarefas) }, null, 2), 'application/json'),
     'importar-json': () => $('#arquivo').click(),
-    'exportar-csv': () => baixar(`${nomeArquivo()}.csv`, C.paraCSV(C.ordenarTarefas(estado.tarefas), C.hojeISO()), 'text/csv;charset=utf-8'),
+    'exportar-csv': () => baixar(`${nomeArquivo()}.csv`, C.paraCSV(C.ordenarTarefas(estado.tarefas), C.hojeISO(), estado.calendario), 'text/csv;charset=utf-8'),
     imprimir: () => window.print(),
     exemplo: carregarExemplo,
     'apagar-tudo': () => {
       if (!estado.tarefas.length || !confirm(`Apagar as ${estado.tarefas.length} atividades deste cronograma? Essa ação não pode ser desfeita.`)) return;
       substituirTudo(estado.titulo, []).then((ok) => ok && avisar('Atividades apagadas.'));
     },
+    calendario: abrirCalendario,
     'ordenar-data': () => {
       if (!estado.tarefas.length) return;
       registrarHistorico();
@@ -1572,6 +1646,29 @@
   });
   form.addEventListener('submit', salvarEditor);
   $('#f-marco').addEventListener('change', aplicarTipoNoEditor);
+  $('#btn-critico').addEventListener('click', () => {
+    estado.critico = !estado.critico;
+    salvarPrefs();
+    render();
+  });
+  $('#form-calendario').addEventListener('submit', salvarCalendario);
+  for (const b of document.querySelectorAll('[data-fechar-calendario]')) b.addEventListener('click', () => $('#dialogo-calendario').close());
+  $('#btn-feriado').addEventListener('click', () => {
+    const data = $('#f-feriado-data').value;
+    if (Number.isNaN(C.diaNumero(data))) {
+      $('#e-feriado').textContent = 'Escolha a data do feriado.';
+      return;
+    }
+    $('#e-feriado').textContent = '';
+    feriadosEditados.push({ data, nome: $('#f-feriado-nome').value });
+    $('#f-feriado-data').value = '';
+    $('#f-feriado-nome').value = '';
+    renderFeriados();
+  });
+  $('#btn-feriados-nacionais').addEventListener('click', () => {
+    feriadosEditados.push(...C.feriadosNacionais(Number($('#f-ano-feriados').value)));
+    renderFeriados();
+  });
   $('#btn-dependencia').addEventListener('click', () => {
     const proibidas = estado.editando ? C.sucessoresDe(estado.tarefas, estado.editando) : new Set();
     const escolhidas = new Set(dependenciasEditadas.map((d) => d.id));

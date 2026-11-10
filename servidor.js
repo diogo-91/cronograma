@@ -87,7 +87,7 @@ function nomeValido(valor) {
 }
 
 function novaEmpresa(nome, extras = {}) {
-  return { id: Cronograma.novoId(), nome, revisao: 0, idGravacao: null, tarefas: [], ...extras };
+  return { id: Cronograma.novoId(), nome, revisao: 0, idGravacao: null, tarefas: [], calendario: Cronograma.normalizarCalendario(), ...extras };
 }
 
 function lerEmpresas(texto) {
@@ -104,7 +104,14 @@ function lerEmpresas(texto) {
     if (!nome || typeof e.id !== 'string' || !ID_EMPRESA.test(e.id) || !Number.isInteger(e.revisao) || e.revisao < 0) return null;
     const r = Cronograma.importarDados(JSON.stringify({ titulo: nome, tarefas: e.tarefas }));
     if (!r.ok) return null;
-    empresas.push({ id: e.id, nome, revisao: e.revisao, idGravacao: idGravacaoValido(e.idGravacao), tarefas: r.dados.tarefas });
+    empresas.push({
+      id: e.id,
+      nome,
+      revisao: e.revisao,
+      idGravacao: idGravacaoValido(e.idGravacao),
+      tarefas: r.dados.tarefas,
+      calendario: Cronograma.normalizarCalendario(e.calendario),
+    });
   }
   return { empresas };
 }
@@ -303,7 +310,7 @@ function criarServidor({ senha, pastaDados }) {
   }
 
   function cronogramaDa(empresa) {
-    return { revisao: empresa.revisao, idGravacao: empresa.idGravacao, titulo: empresa.nome, tarefas: empresa.tarefas };
+    return { revisao: empresa.revisao, idGravacao: empresa.idGravacao, titulo: empresa.nome, tarefas: empresa.tarefas, calendario: empresa.calendario };
   }
 
   function listarEmpresas(res) {
@@ -337,6 +344,7 @@ function criarServidor({ senha, pastaDados }) {
       revisao: empresa.revisao + 1,
       idGravacao: idGravacaoValido(corpo.idGravacao),
       tarefas: r.dados.tarefas,
+      calendario: corpo.calendario === undefined ? empresa.calendario : Cronograma.normalizarCalendario(corpo.calendario),
     };
     const { empresas } = armazenamento.atual();
     armazenamento.gravar({ empresas: empresas.map((e) => (e.id === id ? atualizada : e)) });

@@ -27,6 +27,7 @@
   --foco: rgba(212, 161, 42, 0.45);
   --perigo: #d14343;
   --hoje: #e5484d;
+  --critico: #c62828;
   --sombra-1: 0 1px 2px rgba(23, 23, 28, 0.04), 0 1px 3px rgba(23, 23, 28, 0.06);
   --sombra-2: 0 16px 40px rgba(23, 23, 28, 0.14), 0 2px 8px rgba(23, 23, 28, 0.06);
 
@@ -907,6 +908,21 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
 .g-setas { position: absolute; top: 0; left: 0; z-index: 0; overflow: visible; pointer-events: none; }
 .g-seta { fill: none; stroke: #8b8a93; stroke-width: 1.5; }
 .g-seta-ponta { fill: #8b8a93; }
+.g-barra.critica { box-shadow: inset 0 0 0 2px var(--critico), 0 0 0 3px color-mix(in srgb, var(--critico) 18%, transparent); }
+.g-marco.critica .g-losango { box-shadow: inset 0 0 0 2px var(--critico), 0 0 0 3px color-mix(in srgb, var(--critico) 18%, transparent); }
+.g-seta.critica { stroke: var(--critico); stroke-width: 2; }
+.g-seta-ponta.critica { fill: var(--critico); }
+.g-fundo > .g-feriado { background: rgba(209, 67, 67, 0.07); }
+.selo.critica { --st: var(--critico); margin-left: 6px; }
+#btn-critico[aria-pressed="true"] { color: var(--critico); }
+.item-feriado { gap: 12px; }
+.feriado-data { flex: none; min-width: 120px; font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--texto-suave); }
+.feriado-nome { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.novo-feriado, .feriados-nacionais { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.novo-feriado .campo[type="date"] { flex: 0 0 170px; }
+.novo-feriado .campo[type="text"] { flex: 1 1 160px; min-width: 0; }
+.feriados-nacionais .campo { flex: 0 0 110px; }
+.feriados { max-height: 240px; overflow-y: auto; }
 .btn-pequeno { min-height: 34px; padding: 4px 12px; font-size: 0.85rem; }
 .btn-pequeno svg { width: 16px; height: 16px; }
 .checklist-resumo { display: inline-flex; align-items: center; gap: 4px; margin: 2px 0 0 20px; font-size: 0.78rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; }

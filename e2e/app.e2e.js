@@ -837,6 +837,76 @@ fs.mkdirSync(OUT, { recursive: true });
   await dp.page.waitForSelector('body[data-tela="app"]');
   assert.equal(await dp.page.locator('.g-seta').count(), 9, 'vínculos ficaram no servidor');
 
+  // etapa 4: dias úteis, feriados e caminho crítico
+  const cal = await nova({ viewport: { width: 1366, height: 1100 } });
+  await entrar(cal.page, await novoServidor());
+  const obra = path.join(OUT, 'obra.json');
+  fs.writeFileSync(obra, JSON.stringify({ titulo: 'Obra', tarefas: [
+    { id: 'a', nome: 'Fundação', fase: 'Obra', inicio: '2026-11-09', fim: '2026-11-13' },
+    { id: 'b', nome: 'Alvenaria', fase: 'Obra', inicio: '2026-11-14', fim: '2026-11-15', dependencias: [{ id: 'a', folga: 0 }] },
+    { id: 'c', nome: 'Compras', fase: 'Obra', inicio: '2026-11-09', fim: '2026-11-10' },
+    { id: 'd', nome: 'Vistoria', fase: 'Obra', inicio: '2026-11-14', fim: '2026-11-14', dependencias: [{ id: 'a', folga: 0 }] },
+  ] }));
+  await cal.page.setInputFiles('#arquivo', obra);
+  await aguardarAnuncio(cal.page, '4 atividades importadas.');
+  const datasCal = (nome) => cal.page.locator(`.g-linha:has(.g-nome-texto:text-is("${nome}")) .g-nome-datas`).textContent();
+  assert.equal(await datasCal('Alvenaria'), '14/11 – 15/11', 'sem calendário, sábado e domingo valem');
+
+  await cal.page.click('#menu summary');
+  await cal.page.click('[data-acao=calendario]');
+  await cal.page.check('#f-dias-uteis');
+  await cal.page.selectOption('#f-ano-feriados', '2026');
+  await cal.page.click('#btn-feriados-nacionais');
+  assert.equal(await cal.page.textContent('#f-feriados-total'), '10 feriados');
+  await cal.page.click('#btn-feriados-nacionais');
+  assert.equal(await cal.page.textContent('#f-feriados-total'), '10 feriados', 'não duplica');
+  await cal.page.click('#btn-feriado');
+  assert.equal(await cal.page.textContent('#e-feriado'), 'Escolha a data do feriado.');
+  await cal.page.fill('#f-feriado-data', '2026-11-16');
+  await cal.page.fill('#f-feriado-nome', 'Ponte');
+  await cal.page.click('#btn-feriado');
+  assert.equal(await cal.page.textContent('#f-feriados-total'), '11 feriados');
+  await cal.page.screenshot({ path: path.join(OUT, '24-calendario-feriados.png') });
+  await cal.page.click('#form-calendario button[type=submit]');
+  await aguardarAnuncio(cal.page, 'Calendário salvo. 2 atividades seguintes foram reagendadas');
+  assert.equal(await datasCal('Alvenaria'), '17/11 – 17/11', 'pula fim de semana e a ponte de segunda');
+  assert.equal(await datasCal('Vistoria'), '17/11 – 17/11');
+
+  await cal.page.click('.g-nome-abrir:has(.g-nome-texto:text-is("Alvenaria"))');
+  await cal.page.fill('#f-fim', '2026-11-23');
+  await cal.page.dispatchEvent('#f-fim', 'change');
+  assert.match(await cal.page.textContent('#f-duracao'), /7 dias corridos \(4 dias úteis\)/, '20/11 é feriado; 21 e 22 são fim de semana');
+  await cal.page.click('#form-tarefa button[type=submit]');
+  await aguardarSalvo(cal.page);
+
+  await cal.page.click('#btn-critico');
+  const criticas = await cal.page.$$eval('.g-barra.critica, .g-marco.critica', (els) => els.map((b) => b.getAttribute('aria-label').split(':')[0]).sort());
+  assert.deepEqual(criticas, ['Alvenaria', 'Fundação']);
+  assert.equal(await cal.page.locator('.g-seta.critica').count(), 1, 'seta crítica só entre Fundação e Alvenaria');
+  await cal.page.click('[data-zoom=dia]');
+  assert.ok((await cal.page.locator('.g-feriado').count()) >= 2, 'feriados sombreados no Gantt');
+  await cal.page.screenshot({ path: path.join(OUT, '25-caminho-critico.png') });
+
+  await cal.page.focus('[data-barra][aria-label^="Compras:"]');
+  for (let i = 0; i < 4; i++) await cal.page.keyboard.press('ArrowRight');
+  await aguardarSalvo(cal.page);
+  assert.equal(await datasCal('Compras'), '13/11 – 17/11', 'setas param só em dias úteis: sexta e terça, pulando a ponte');
+
+  await cal.page.click('[data-visao=tabela]');
+  assert.equal(await cal.page.textContent('.tabela tr.linha-tarefa:has(.nome-link:has-text("Alvenaria")) .c-dur'), '4 dias úteis');
+  assert.equal(await cal.page.locator('.tabela .selo.critica').count(), 2);
+  await cal.page.click('#menu summary');
+  const [csvCal] = await Promise.all([cal.page.waitForEvent('download'), cal.page.click('[data-acao=exportar-csv]')]);
+  assert.match(fs.readFileSync(await csvCal.path(), 'utf8'), /Duração \(dias úteis\)/);
+
+  await cal.page.reload();
+  await cal.page.waitForSelector('body[data-tela="app"]');
+  await cal.page.click('#menu summary');
+  await cal.page.click('[data-acao=calendario]');
+  assert.equal(await cal.page.isChecked('#f-dias-uteis'), true, 'calendário ficou no servidor');
+  assert.equal(await cal.page.textContent('#f-feriados-total'), '11 feriados');
+  await cal.page.click('[data-fechar-calendario].btn');
+
   // sair volta para a tela de senha
   await page.click('#menu summary');
   await page.click('[data-acao=sair]');

@@ -133,15 +133,128 @@ const Cronograma = (() => {
     return { ...tarefa, inicio: novoInicio, fim: novoFim };
   }
 
-  function deslocarTarefa(tarefa, dias) {
-    return comDatas(tarefa, diaNumero(tarefa.inicio) + dias, diaNumero(tarefa.fim) + dias);
+  const SEGUNDA_REFERENCIA = 4;
+  const MAX_FERIADOS = 500;
+  const cacheFeriados = new WeakMap();
+
+  function normalizarCalendario(calendario) {
+    const porData = new Map();
+    for (const f of Array.isArray(calendario?.feriados) ? calendario.feriados : []) {
+      if (!f || typeof f !== 'object' || Number.isNaN(diaNumero(f.data)) || porData.has(f.data)) continue;
+      porData.set(f.data, { data: f.data, nome: texto(f.nome).slice(0, 80) });
+    }
+    const feriados = [...porData.values()].sort((a, b) => comparar(a.data, b.data)).slice(0, MAX_FERIADOS);
+    return { diasUteis: calendario?.diasUteis === true, feriados };
   }
 
-  function redimensionarTarefa(tarefa, lado, dias) {
-    if (tarefa.tipo === 'marco') return deslocarTarefa(tarefa, dias);
+  function diasDeFeriado(calendario) {
+    if (!cacheFeriados.has(calendario)) {
+      const dias = (calendario.feriados || []).map((f) => diaNumero(f.data)).filter((d) => Number.isFinite(d) && !ehFimDeSemana(d));
+      cacheFeriados.set(calendario, { conjunto: new Set(dias), ordenados: [...new Set(dias)].sort((a, b) => a - b) });
+    }
+    return cacheFeriados.get(calendario);
+  }
+
+  function ehFimDeSemana(dia) {
+    const semana = diaDaSemana(dia);
+    return semana === 0 || semana === 6;
+  }
+
+  function usaDiasUteis(calendario) {
+    return Boolean(calendario && calendario.diasUteis);
+  }
+
+  function diaUtil(dia, calendario) {
+    return !usaDiasUteis(calendario) || (!ehFimDeSemana(dia) && !diasDeFeriado(calendario).conjunto.has(dia));
+  }
+
+  function ehDiaUtil(iso, calendario) {
+    return diaUtil(diaNumero(iso), calendario);
+  }
+
+  function diaUtilMaisProximo(dia, calendario, sentido) {
+    let atual = dia;
+    for (let i = 0; i < 1000 && !diaUtil(atual, calendario); i++) atual += sentido;
+    return atual;
+  }
+
+  function somarDiasUteis(dia, quantidade, calendario) {
+    if (!usaDiasUteis(calendario)) return dia + quantidade;
+    const sentido = quantidade < 0 ? -1 : 1;
+    let atual = dia;
+    for (let i = 0; i < Math.abs(quantidade); i++) atual = diaUtilMaisProximo(atual + sentido, calendario, sentido);
+    return atual;
+  }
+
+  function contarDiasUteis(inicio, fim, calendario) {
+    if (!usaDiasUteis(calendario)) return fim - inicio + 1;
+    return indiceUtil(fim + 1, calendario) - indiceUtil(inicio, calendario);
+  }
+
+  function indiceUtil(dia, calendario) {
+    if (!usaDiasUteis(calendario)) return dia;
+    const deslocamento = dia - SEGUNDA_REFERENCIA;
+    const semanas = Math.floor(deslocamento / 7);
+    const resto = deslocamento - semanas * 7;
+    const feriadosAntes = diasDeFeriado(calendario).ordenados.filter((f) => f < dia).length;
+    return semanas * 5 + Math.min(resto, 5) - feriadosAntes;
+  }
+
+  function duracaoNoCalendario(tarefa, calendario) {
+    return contarDiasUteis(diaNumero(tarefa.inicio), diaNumero(tarefa.fim), calendario);
+  }
+
+  function posicionarEm(tarefa, inicio, calendario) {
+    if (tarefa.tipo === 'marco') return comDatas(tarefa, inicio, inicio);
+    if (!usaDiasUteis(calendario)) return comDatas(tarefa, inicio, inicio + duracaoDias(tarefa) - 1);
+    const duracao = Math.max(1, duracaoNoCalendario(tarefa, calendario));
+    return comDatas(tarefa, inicio, somarDiasUteis(inicio, duracao - 1, calendario));
+  }
+
+  function deslocarTarefa(tarefa, dias, calendario) {
+    if (!usaDiasUteis(calendario)) return comDatas(tarefa, diaNumero(tarefa.inicio) + dias, diaNumero(tarefa.fim) + dias);
+    const inicio = diaUtilMaisProximo(diaNumero(tarefa.inicio) + dias, calendario, dias < 0 ? -1 : 1);
+    return posicionarEm(tarefa, inicio, calendario);
+  }
+
+  function redimensionarTarefa(tarefa, lado, dias, calendario) {
+    if (tarefa.tipo === 'marco') return deslocarTarefa(tarefa, dias, calendario);
     const inicio = diaNumero(tarefa.inicio);
     const fim = diaNumero(tarefa.fim);
-    return lado === 'inicio' ? comDatas(tarefa, Math.min(inicio + dias, fim), fim) : comDatas(tarefa, inicio, Math.max(fim + dias, inicio));
+    const sentido = dias < 0 ? -1 : 1;
+    if (lado === 'inicio') return comDatas(tarefa, Math.min(diaUtilMaisProximo(inicio + dias, calendario, sentido), fim), fim);
+    return comDatas(tarefa, inicio, Math.max(diaUtilMaisProximo(fim + dias, calendario, sentido), inicio));
+  }
+
+  function feriadosNacionais(ano) {
+    const a = ano % 19;
+    const b = Math.floor(ano / 100);
+    const c = ano % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const mesPascoa = Math.floor((h + l - 7 * m + 114) / 31);
+    const diaPascoa = ((h + l - 7 * m + 114) % 31) + 1;
+    const pascoa = Date.UTC(ano, mesPascoa - 1, diaPascoa) / MS_DIA;
+    const fixo = (mes, dia) => `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    return [
+      { data: fixo(1, 1), nome: 'Confraternização Universal' },
+      { data: isoDeDia(pascoa - 2), nome: 'Sexta-feira Santa' },
+      { data: fixo(4, 21), nome: 'Tiradentes' },
+      { data: fixo(5, 1), nome: 'Dia do Trabalho' },
+      { data: fixo(9, 7), nome: 'Independência do Brasil' },
+      { data: fixo(10, 12), nome: 'Nossa Senhora Aparecida' },
+      { data: fixo(11, 2), nome: 'Finados' },
+      { data: fixo(11, 15), nome: 'Proclamação da República' },
+      { data: fixo(11, 20), nome: 'Dia Nacional de Zumbi e da Consciência Negra' },
+      { data: fixo(12, 25), nome: 'Natal' },
+    ].sort((x, y) => comparar(x.data, y.data));
   }
 
   function progressoPelaPosicao(posicao, largura) {
@@ -233,37 +346,70 @@ const Cronograma = (() => {
     return achados;
   }
 
-  function reagendar(tarefas) {
-    const porId = new Map(tarefas.map((t) => [t.id, t]));
-    const pendentes = new Map(tarefas.map((t) => [t.id, (t.dependencias || []).filter((d) => porId.has(d.id)).length]));
+  function ordemTopologica(tarefas) {
+    const ids = new Set(tarefas.map((t) => t.id));
+    const pendentes = new Map(tarefas.map((t) => [t.id, (t.dependencias || []).filter((d) => ids.has(d.id)).length]));
     const seguintes = new Map();
-    for (const t of tarefas) for (const d of t.dependencias || []) if (porId.has(d.id)) seguintes.set(d.id, [...(seguintes.get(d.id) || []), t.id]);
+    for (const t of tarefas) for (const d of t.dependencias || []) if (ids.has(d.id)) seguintes.set(d.id, [...(seguintes.get(d.id) || []), t.id]);
     const fila = tarefas.filter((t) => pendentes.get(t.id) === 0).map((t) => t.id);
-    const movidas = [];
-    let processadas = 0;
+    const ordem = [];
     while (fila.length) {
       const id = fila.shift();
-      processadas += 1;
-      const t = porId.get(id);
-      const preds = (t.dependencias || []).filter((d) => porId.has(d.id));
-      if (preds.length) {
-        const maisCedo = Math.max(...preds.map((d) => diaNumero(porId.get(d.id).fim) + 1 + d.folga));
-        const inicio = diaNumero(t.inicio);
-        if (inicio < maisCedo) {
-          const movida = deslocarTarefa(t, maisCedo - inicio);
-          if (movida !== t) {
-            porId.set(id, movida);
-            movidas.push(id);
-          }
-        }
-      }
+      ordem.push(id);
       for (const s of seguintes.get(id) || []) {
         pendentes.set(s, pendentes.get(s) - 1);
         if (pendentes.get(s) === 0) fila.push(s);
       }
     }
-    if (processadas < tarefas.length) return { tarefas, movidas: [] };
+    return ordem.length === tarefas.length ? { ordem, seguintes } : null;
+  }
+
+  function reagendar(tarefas, calendario) {
+    const topo = ordemTopologica(tarefas);
+    if (!topo) return { tarefas, movidas: [] };
+    const porId = new Map(tarefas.map((t) => [t.id, t]));
+    const movidas = [];
+    for (const id of topo.ordem) {
+      const t = porId.get(id);
+      const preds = (t.dependencias || []).filter((d) => porId.has(d.id));
+      if (!preds.length) continue;
+      const maisCedo = Math.max(...preds.map((d) => {
+        const depoisDoFim = diaUtilMaisProximo(diaNumero(porId.get(d.id).fim) + 1, calendario, 1);
+        return somarDiasUteis(depoisDoFim, d.folga, calendario);
+      }));
+      if (diaNumero(t.inicio) >= maisCedo) continue;
+      const movida = posicionarEm(t, maisCedo, calendario);
+      if (movida === t) continue;
+      porId.set(id, movida);
+      movidas.push(id);
+    }
     return { tarefas: tarefas.map((t) => porId.get(t.id)), movidas };
+  }
+
+  function caminhoCritico(tarefas, calendario) {
+    const topo = ordemTopologica(tarefas);
+    if (!topo || !tarefas.length) return new Set();
+    const porId = new Map(tarefas.map((t) => [t.id, t]));
+    const comeco = new Map();
+    const termino = new Map();
+    for (const t of tarefas) {
+      const inicio = indiceUtil(diaUtilMaisProximo(diaNumero(t.inicio), calendario, 1), calendario);
+      const fim = indiceUtil(diaUtilMaisProximo(diaNumero(t.fim), calendario, -1), calendario);
+      comeco.set(t.id, inicio);
+      termino.set(t.id, Math.max(fim, inicio));
+    }
+    const fimDoProjeto = Math.max(...termino.values());
+    const limite = new Map();
+    for (const id of [...topo.ordem].reverse()) {
+      let ultimoFim = fimDoProjeto;
+      for (const s of topo.seguintes.get(id) || []) {
+        const folga = porId.get(s).dependencias.find((d) => d.id === id).folga;
+        const ultimoInicioDoSeguinte = limite.get(s) - (termino.get(s) - comeco.get(s));
+        ultimoFim = Math.min(ultimoFim, ultimoInicioDoSeguinte - 1 - folga);
+      }
+      limite.set(id, ultimoFim);
+    }
+    return new Set(tarefas.filter((t) => limite.get(t.id) - termino.get(t.id) <= 0).map((t) => t.id));
   }
 
   function compararPorData(a, b) {
@@ -431,15 +577,15 @@ const Cronograma = (() => {
     return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }
 
-  function paraCSV(tarefas, hoje) {
-    const cabecalho = ['Atividade', 'Fase', 'Responsável', 'Início', 'Fim', 'Duração (dias)', 'Progresso (%)', 'Status', 'Notas', 'Checklist', 'Tipo'];
+  function paraCSV(tarefas, hoje, calendario) {
+    const cabecalho = ['Atividade', 'Fase', 'Responsável', 'Início', 'Fim', usaDiasUteis(calendario) ? 'Duração (dias úteis)' : 'Duração (dias)', 'Progresso (%)', 'Status', 'Notas', 'Checklist', 'Tipo'];
     const linhas = tarefas.map((t) => [
       t.nome,
       t.fase,
       t.responsavel,
       formatarData(t.inicio),
       formatarData(t.fim),
-      duracaoDias(t),
+      duracaoNoCalendario(t, calendario),
       t.progresso,
       ROTULO_STATUS[statusTarefa(t, hoje)],
       notasEmTexto(t.notas),
@@ -505,6 +651,11 @@ const Cronograma = (() => {
     deslocarTarefa,
     sucessoresDe,
     reagendar,
+    caminhoCritico,
+    normalizarCalendario,
+    ehDiaUtil,
+    duracaoNoCalendario,
+    feriadosNacionais,
     redimensionarTarefa,
     progressoPelaPosicao,
     criarHistorico,
