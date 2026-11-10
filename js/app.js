@@ -14,7 +14,7 @@
     recusado: 'Não salvo: o servidor recusou os dados',
   };
   const TITULO_PADRAO = 'Meu cronograma';
-  const VISOES = ['gantt', 'tabela'];
+  const VISOES = ['gantt', 'tabela', 'carga'];
   const ZOOMS = ['dia', 'semana', 'mes'];
   const NUM_CORES = 8;
   const TAMANHO_MAXIMO_IMPORTACAO = 1.5 * 1024 * 1024;
@@ -61,6 +61,7 @@
     editando: null,
     recolhidas: new Set(),
     calendario: C.normalizarCalendario(),
+    linhaBase: null,
     critico: false,
   };
   let feriadosEditados = [];
@@ -159,11 +160,12 @@
     estado.titulo = doc.titulo;
     estado.tarefas = comOrdem(doc.tarefas);
     estado.calendario = C.normalizarCalendario(doc.calendario);
+    estado.linhaBase = C.normalizarLinhaBase(doc.linhaBase);
     historico.limpar();
   }
 
   function fotografia() {
-    return structuredClone({ tarefas: estado.tarefas, calendario: estado.calendario });
+    return structuredClone({ tarefas: estado.tarefas, calendario: estado.calendario, linhaBase: estado.linhaBase });
   }
 
   function registrarHistorico() {
@@ -175,6 +177,7 @@
     if (!restaurado) return;
     estado.tarefas = restaurado.tarefas;
     estado.calendario = restaurado.calendario;
+    estado.linhaBase = restaurado.linhaBase;
     salvar();
     render();
     avisar(direcao === 'desfazer' ? 'Alteração desfeita.' : 'Alteração refeita.');
@@ -205,6 +208,38 @@
     if (!estado.calendario.diasUteis) return `${corridos} ${corridos === 1 ? 'dia' : 'dias'}`;
     const uteis = C.duracaoNoCalendario(tarefa, estado.calendario);
     return `${uteis} ${uteis === 1 ? 'dia útil' : 'dias úteis'}`;
+  }
+
+  function textoDias(dias) {
+    const n = Math.abs(dias);
+    if (estado.calendario.diasUteis) return `${n} ${n === 1 ? 'dia útil' : 'dias úteis'}`;
+    return `${n} ${n === 1 ? 'dia' : 'dias'}`;
+  }
+
+  function textoDesvio(desvio) {
+    if (desvio > 0) return `${textoDias(desvio)} de atraso`;
+    if (desvio < 0) return `${textoDias(desvio)} adiantada`;
+    return 'no prazo';
+  }
+
+  function salvarLinhaBase() {
+    if (!estado.tarefas.length) {
+      avisar('Cadastre atividades antes de salvar a linha de base.');
+      return;
+    }
+    if (estado.linhaBase && !confirm(`Substituir a linha de base de ${C.formatarData(estado.linhaBase.data)} pelas datas atuais?`)) return;
+    registrarHistorico();
+    estado.linhaBase = C.criarLinhaBase(estado.tarefas, C.hojeISO());
+    salvar().then((ok) => ok && avisar(`Linha de base salva com ${estado.tarefas.length} ${estado.tarefas.length === 1 ? 'atividade' : 'atividades'}.`, { rotulo: 'Desfazer', executar: () => voltarNoHistorico('desfazer') }));
+    render();
+  }
+
+  function removerLinhaBase() {
+    if (!estado.linhaBase) return;
+    registrarHistorico();
+    estado.linhaBase = null;
+    salvar().then((ok) => ok && avisar('Linha de base removida.', { rotulo: 'Desfazer', executar: () => voltarNoHistorico('desfazer') }));
+    render();
   }
 
   function abrirCalendario() {
@@ -570,7 +605,7 @@
     aguardandoEnvio = [];
     const idGravacao = C.novoId();
     const geracao = geracaoSessao;
-    const corpo = JSON.stringify({ revisaoBase: revisao, idGravacao, titulo: estado.titulo, tarefas: estado.tarefas, calendario: estado.calendario });
+    const corpo = JSON.stringify({ revisaoBase: revisao, idGravacao, titulo: estado.titulo, tarefas: estado.tarefas, calendario: estado.calendario, linhaBase: estado.linhaBase });
     const manterViva = aoSair && new TextEncoder().encode(corpo).length < LIMITE_ENVIO_AO_SAIR;
     gravacoesSemResposta.add(idGravacao);
     const r = await chamarApi('PUT', `api/empresas/${empresaAtual}`, corpo, { keepalive: manterViva });
@@ -698,14 +733,18 @@
     $('#resumo').hidden = semTarefas;
     $('.ferramentas').hidden = semTarefas;
     $('#grupo-zoom').hidden = estado.visao !== 'gantt';
+    $('#grupo-critico').hidden = estado.visao === 'carga';
+    $('#menu-remover-base').hidden = !estado.linhaBase;
     $('#vazio').hidden = !vazio;
     caixaGantt.hidden = vazio || estado.visao !== 'gantt';
     $('#vista-tabela').hidden = vazio || estado.visao !== 'tabela';
+    $('#vista-carga').hidden = vazio || estado.visao !== 'carga';
 
     renderResumo(C.resumo(visiveis, hoje), filtrando);
     renderOpcoes(cores);
     if (vazio) renderVazio(semTarefas);
     else if (estado.visao === 'gantt') renderGantt(visiveis, cores, hoje, !filtrando);
+    else if (estado.visao === 'carga') renderCarga(visiveis, hoje);
     else renderTabela(visiveis, cores, hoje, !filtrando);
   }
 
@@ -893,14 +932,17 @@
   }
 
   function renderGantt(lista, cores, hoje, podeArrastar) {
-    const e = C.escalaGantt(lista, estado.zoom, hoje);
+    const base = new Map((estado.linhaBase?.tarefas || []).map((b) => [b.id, b]));
+    const planejadas = lista.filter((t) => base.has(t.id)).map((t) => ({ id: `base:${t.id}`, inicio: base.get(t.id).inicio, fim: base.get(t.id).fim }));
+    const alcance = [...lista, ...planejadas];
+    const e = C.escalaGantt(alcance, estado.zoom, hoje);
     const criticas = estado.critico ? C.caminhoCritico(estado.tarefas, estado.calendario) : new Set();
     $('#btn-critico').setAttribute('aria-pressed', String(estado.critico));
     const px = (n) => `${n}px`;
     hojeNoGantt = e.hojeLeft === null ? null : e.hojeLeft + e.pxDia / 2;
     for (const b of document.querySelectorAll('[data-zoom]')) {
       b.setAttribute('aria-pressed', String(b.dataset.zoom === e.zoom));
-      b.disabled = C.zoomEfetivo(lista, b.dataset.zoom) !== b.dataset.zoom;
+      b.disabled = C.zoomEfetivo(alcance, b.dataset.zoom) !== b.dataset.zoom;
       b.title = b.disabled ? 'Período longo demais para esta escala' : '';
     }
 
@@ -936,7 +978,11 @@
       const marco = t.tipo === 'marco';
       const periodo = marco ? C.formatarData(t.inicio) : `${C.formatarData(t.inicio)} a ${C.formatarData(t.fim)}`;
       const situacao = marco ? (t.progresso >= 100 ? 'concluído' : 'pendente') : `${t.progresso}% concluído`;
-      const descricao = `${marco ? 'Marco ' : ''}${t.nome}: ${periodo}, ${situacao}, ${C.ROTULO_STATUS[status]}`;
+      const planejada = base.get(t.id);
+      const textoBase = planejada
+        ? `. Linha de base: ${marco ? C.formatarData(planejada.inicio) : `${C.formatarData(planejada.inicio)} a ${C.formatarData(planejada.fim)}`}, ${textoDesvio(C.desvioLinhaBase(t, estado.linhaBase, estado.calendario))}`
+        : '';
+      const descricao = `${marco ? 'Marco ' : ''}${t.nome}: ${periodo}, ${situacao}, ${C.ROTULO_STATUS[status]}${textoBase}`;
       const datas = marco ? `${dataCurta(t.inicio)} · marco` : `${dataCurta(t.inicio)} – ${dataCurta(t.fim)}`;
       const desenho = marco
         ? el('button', {
@@ -974,7 +1020,9 @@
           el('button', { type: 'button', class: 'g-nome-abrir', title: t.nome, 'data-id': t.id, onclick: () => abrirEditor(t.id) },
             el('span', { class: 'g-nome-texto' }, t.nome),
             el('span', { class: 'g-nome-datas' }, `${datas}${textoChecklist(t)}`))),
-        el('div', { class: 'g-trilho' }, desenho));
+        el('div', { class: 'g-trilho' },
+          planejada && el('div', { class: `g-base${marco ? ' marco' : ''}`, 'aria-hidden': 'true', style: posicaoDe(planejada.inicio, planejada.fim) }),
+          desenho));
     };
 
     const linhaGrupo = (g) => {
@@ -1064,7 +1112,7 @@
           marco
             ? el('span', { class: 'marco-situacao' }, t.progresso >= 100 ? 'Marco concluído' : 'Marco pendente')
             : el('div', { class: 'progresso-celula' }, el('div', { class: 'medidor' }, el('span', { style: { width: `${t.progresso}%` } })), el('b', {}, `${t.progresso}%`))),
-        el('td', { class: 'c-status' }, el('span', { class: `selo ${status}` }, C.ROTULO_STATUS[status]), critica && el('span', { class: 'selo critica' }, 'Crítica')),
+        el('td', { class: 'c-status' }, el('span', { class: `selo ${status}` }, C.ROTULO_STATUS[status]), critica && el('span', { class: 'selo critica' }, 'Crítica'), seloDesvio(t)),
         el('td', { class: 'c-acoes' },
           el('div', { class: 'acoes-linha' },
             el('button', { type: 'button', class: 'btn-icone', title: 'Duplicar', 'aria-label': `Duplicar ${t.nome}`, onclick: () => duplicar(t.id) }, icone('duplicar')),
@@ -1093,6 +1141,50 @@
       el('table', { class: 'tabela' },
         el('thead', {}, el('tr', {}, ...cabecalho.map((c, i) => el('th', { class: i === 5 ? 'num' : null, scope: 'col' }, c)))),
         el('tbody', {}, ...linhas)),
+    );
+  }
+
+  function seloDesvio(tarefa) {
+    const desvio = estado.linhaBase ? C.desvioLinhaBase(tarefa, estado.linhaBase, estado.calendario) : null;
+    if (!desvio) return null;
+    return el('span', {
+      class: `selo desvio ${desvio > 0 ? 'atraso' : 'adiantada'}`,
+      title: `Término em relação à linha de base de ${C.formatarData(estado.linhaBase.data)}: ${textoDesvio(desvio)}`,
+    }, `${desvio > 0 ? '+' : '−'}${textoDias(desvio)}`);
+  }
+
+  function renderCarga(lista, hoje) {
+    const carga = C.cargaPorResponsavel(lista, estado.calendario);
+    const caixa = $('#vista-carga');
+    if (!carga.pessoas.length) {
+      caixa.replaceChildren(el('p', { class: 'carga-legenda' }, 'Nenhuma atividade com duração para medir a carga (marcos não ocupam ninguém).'));
+      return;
+    }
+    const nomeDe = new Map(lista.map((t) => [t.id, t.nome]));
+    const dia = C.diaNumero(hoje);
+    const atual = carga.semanas.findIndex((s) => C.diaNumero(s.inicio) <= dia && dia <= C.diaNumero(s.fim));
+    const unidade = estado.calendario.diasUteis ? 'num mesmo dia útil' : 'num mesmo dia';
+    caixa.replaceChildren(
+      el('p', { class: 'carga-legenda' },
+        `Cada célula mostra quantas atividades a pessoa tem ao mesmo tempo ${unidade} na semana (o pico). `,
+        el('span', { class: 'carga-amostra sobrecarga' }, '2+'), ' indica sobrecarga.'),
+      el('div', { class: 'carga-rolagem' },
+        el('table', { class: 'carga' },
+          el('thead', {}, el('tr', {},
+            el('th', { scope: 'col', class: 'carga-pessoa' }, 'Responsável'),
+            ...carga.semanas.map((s, i) => el('th', { scope: 'col', class: i === atual ? 'atual' : null, title: `Semana de ${C.formatarData(s.inicio)} a ${C.formatarData(s.fim)}` }, dataCurta(s.inicio))))),
+          el('tbody', {}, ...carga.pessoas.map((p) => {
+            const nome = p.nome || 'Sem responsável';
+            return el('tr', {},
+              el('th', { scope: 'row', class: 'carga-pessoa' },
+                el('span', { class: 'pessoa' }, el('span', { class: 'avatar', 'aria-hidden': 'true' }, p.nome ? C.iniciais(p.nome) : '?'), el('span', {}, nome))),
+              ...p.celulas.map((c, i) => el('td', {
+                class: `${c.pico >= 2 ? 'sobrecarga' : c.pico ? 'ocupada' : 'livre'}${i === atual ? ' atual' : ''}`,
+                title: c.tarefas.length
+                  ? `${nome}, semana de ${C.formatarData(carga.semanas[i].inicio)}: ${c.pico} ao mesmo tempo. ${c.tarefas.map((id) => nomeDe.get(id)).join(', ')}`
+                  : `${nome}, semana de ${C.formatarData(carga.semanas[i].inicio)}: livre`,
+              }, c.pico ? String(c.pico) : '')));
+          })))),
     );
   }
 
@@ -1485,6 +1577,8 @@
       substituirTudo(estado.titulo, []).then((ok) => ok && avisar('Atividades apagadas.'));
     },
     calendario: abrirCalendario,
+    'linha-base': salvarLinhaBase,
+    'remover-linha-base': removerLinhaBase,
     'ordenar-data': () => {
       if (!estado.tarefas.length) return;
       registrarHistorico();

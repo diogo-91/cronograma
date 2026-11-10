@@ -710,6 +710,17 @@ textarea.campo { resize: vertical; }
 }
 .g-barra.atrasada .g-rotulo { color: var(--st-atrasada); }
 
+.g-base {
+  position: absolute;
+  top: calc(50% + 15px);
+  height: 5px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(90deg, #a9a8b0 0 6px, #cfced4 6px 9px);
+  pointer-events: none;
+}
+.g-base.marco { background: none; }
+.g-base.marco::after { content: ""; position: absolute; left: 50%; top: -2px; width: 7px; height: 7px; margin-left: -4px; transform: rotate(45deg); border: 1.5px solid #a9a8b0; background: var(--superficie); }
+
 /* Lista */
 
 .lista {
@@ -914,6 +925,24 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
 .g-seta-ponta.critica { fill: var(--critico); }
 .g-fundo > .g-feriado { background: rgba(209, 67, 67, 0.07); }
 .selo.critica { --st: var(--critico); margin-left: 6px; }
+.selo.desvio { margin-left: 6px; }
+.selo.desvio::before { display: none; }
+.selo.atraso { --st: var(--st-atrasada); }
+.selo.adiantada { --st: var(--st-concluida); }
+.vista-carga { padding: 14px 0 6px; background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); box-shadow: var(--sombra-1); overflow: hidden; }
+.carga-legenda { margin: 0 16px 12px; font-size: 0.85rem; color: var(--texto-suave); }
+.carga-rolagem { overflow-x: auto; }
+.carga { border-collapse: separate; border-spacing: 3px; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.carga th { font-size: 0.72rem; font-weight: 600; color: var(--texto-suave); white-space: nowrap; padding: 4px 2px; }
+.carga thead th.atual { color: var(--ouro-texto); }
+.carga .carga-pessoa { position: sticky; left: 0; z-index: 1; background: var(--superficie); text-align: left; padding: 4px 12px 4px 16px; font-size: 0.85rem; color: var(--texto); min-width: 150px; max-width: 220px; }
+.carga .carga-pessoa .pessoa > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.carga td { width: 44px; min-width: 44px; height: 36px; text-align: center; border-radius: 6px; font-weight: 700; }
+.carga td.livre { background: var(--superficie-2); }
+.carga td.ocupada { background: color-mix(in srgb, var(--st-concluida) 16%, var(--superficie)); color: var(--st-concluida); }
+.carga td.sobrecarga, .carga-amostra.sobrecarga { background: color-mix(in srgb, var(--st-atrasada) 18%, var(--superficie)); color: var(--st-atrasada); }
+.carga td.atual { box-shadow: inset 0 0 0 2px var(--ouro); }
+.carga-amostra { display: inline-block; padding: 0 6px; border-radius: 4px; font-weight: 700; }
 #btn-critico[aria-pressed="true"] { color: var(--critico); }
 .item-feriado { gap: 12px; }
 .feriado-data { flex: none; min-width: 120px; font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--texto-suave); }
@@ -964,6 +993,8 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
 
 @media (max-width: 760px) {
   :root { --col-nome: 128px; --altura-linha: 52px; }
+  .carga .carga-pessoa { min-width: 110px; max-width: 140px; padding-left: 10px; }
+  .carga-legenda { margin: 0 10px 10px; }
 
   .topo {
     position: static;

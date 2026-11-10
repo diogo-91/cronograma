@@ -907,6 +907,73 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.equal(await cal.page.textContent('#f-feriados-total'), '11 feriados');
   await cal.page.click('[data-fechar-calendario].btn');
 
+  // etapa 5: linha de base e carga por responsável
+  const lb = await nova({ viewport: { width: 1366, height: 1000 } });
+  const urlLb = await novoServidor();
+  await entrar(lb.page, urlLb);
+  const equipe = path.join(OUT, 'equipe.json');
+  fs.writeFileSync(equipe, JSON.stringify({ titulo: 'Equipe', tarefas: [
+    { id: 'a', nome: 'Projeto', fase: 'Plano', responsavel: 'Ana', inicio: '2026-11-09', fim: '2026-11-13' },
+    { id: 'b', nome: 'Licença', fase: 'Plano', responsavel: 'Ana', inicio: '2026-11-11', fim: '2026-11-12' },
+    { id: 'c', nome: 'Compra', fase: 'Obra', responsavel: 'Bruno', inicio: '2026-11-16', fim: '2026-11-18' },
+    { id: 'd', nome: 'Entrega', fase: 'Obra', responsavel: 'Bruno', tipo: 'marco', inicio: '2026-11-20', fim: '2026-11-20' },
+  ] }));
+  await lb.page.setInputFiles('#arquivo', equipe);
+  await aguardarAnuncio(lb.page, '4 atividades importadas.');
+  assert.equal(await lb.page.locator('.g-base').count(), 0, 'sem linha de base, nada de faixa');
+  await lb.page.click('#menu summary');
+  assert.equal(await lb.page.isVisible('#menu-remover-base'), false);
+  await lb.page.click('[data-acao=linha-base]');
+  await aguardarAnuncio(lb.page, 'Linha de base salva com 4 atividades.');
+  await aguardarSalvo(lb.page);
+  assert.equal(await lb.page.locator('.g-base').count(), 4, 'uma faixa por atividade, marco incluído');
+
+  await lb.page.focus('[data-barra][aria-label^="Compra:"]');
+  await lb.page.keyboard.press('ArrowRight');
+  await lb.page.keyboard.press('ArrowRight');
+  await aguardarSalvo(lb.page);
+  assert.match(await lb.page.getAttribute('[data-barra][aria-label^="Compra:"]', 'aria-label'), /Linha de base: 16\/11\/2026 a 18\/11\/2026, 2 dias de atraso/);
+  assert.match(await lb.page.getAttribute('[data-barra][aria-label^="Projeto:"]', 'aria-label'), /no prazo/);
+  const faixa = await lb.page.locator('.g-linha:has(.g-nome-texto:text-is("Compra")) .g-base').boundingBox();
+  const barra = await lb.page.locator('[data-barra][aria-label^="Compra:"]').boundingBox();
+  assert.ok(barra.x - faixa.x > 20, 'a faixa da base ficou nas datas antigas, a barra andou');
+  await lb.page.click('[data-zoom=dia]');
+  await lb.page.screenshot({ path: path.join(OUT, '26-linha-de-base.png') });
+
+  await lb.page.reload();
+  await lb.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await lb.page.locator('.g-base').count(), 4, 'linha de base ficou no servidor');
+  await lb.page.click('[data-visao=tabela]');
+  assert.deepEqual(await lb.page.$$eval('.tabela .selo.desvio', (els) => els.map((e) => e.textContent)), ['+2 dias'], 'só a Compra desviou');
+
+  await lb.page.click('[data-visao=carga]');
+  assert.equal(await lb.page.isVisible('#grupo-critico'), false);
+  const celula = (pessoa, i) => lb.page.locator(`.carga tbody tr:has(th:has-text("${pessoa}")) td`).nth(i);
+  assert.deepEqual(await lb.page.$$eval('.carga thead th', (els) => els.map((e) => e.textContent)), ['Responsável', '09/11', '16/11']);
+  assert.equal(await celula('Ana', 0).textContent(), '2', 'Projeto e Licença ao mesmo tempo');
+  assert.match(await celula('Ana', 0).getAttribute('class'), /sobrecarga/);
+  assert.match(await celula('Ana', 0).getAttribute('title'), /Projeto, Licença/);
+  assert.equal(await celula('Bruno', 0).textContent(), '', 'marco não ocupa');
+  assert.equal(await celula('Bruno', 1).textContent(), '1');
+  assert.match(await celula('Bruno', 1).getAttribute('class'), /ocupada/);
+  await lb.page.screenshot({ path: path.join(OUT, '27-carga.png') });
+
+  const lbCel = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await entrar(lbCel.page, urlLb);
+  await lbCel.page.click('[data-visao=carga]');
+  await lbCel.page.waitForSelector('.carga');
+  assert.ok(await lbCel.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'carga não cria rolagem lateral na página');
+  await lbCel.page.screenshot({ path: path.join(OUT, '28-carga-celular.png') });
+
+  await lb.page.click('[data-visao=gantt]');
+  await lb.page.click('#menu summary');
+  await lb.page.click('[data-acao=remover-linha-base]');
+  await aguardarAnuncio(lb.page, 'Linha de base removida.');
+  assert.equal(await lb.page.locator('.g-base').count(), 0);
+  await lb.page.click('#btn-desfazer');
+  assert.equal(await lb.page.locator('.g-base').count(), 4, 'desfazer devolve a linha de base');
+  await aguardarSalvo(lb.page);
+
   // sair volta para a tela de senha
   await page.click('#menu summary');
   await page.click('[data-acao=sair]');
