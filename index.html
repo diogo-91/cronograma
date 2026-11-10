@@ -81,6 +81,10 @@
         <option value="concluida">Concluída</option>
       </select>
       <div class="modos">
+      <div class="segmentado historico" role="group" aria-label="Histórico de alterações">
+        <button type="button" id="btn-desfazer" title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+        <button type="button" id="btn-refazer" title="Refazer (Ctrl+Shift+Z)" aria-label="Refazer" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+      </div>
       <div class="segmentado" role="group" aria-label="Visualização">
         <button type="button" data-visao="gantt">Gantt</button>
         <button type="button" data-visao="tabela">Lista</button>

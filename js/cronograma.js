@@ -122,6 +122,56 @@ const Cronograma = (() => {
     return a < b ? -1 : a > b ? 1 : 0;
   }
 
+  function comDatas(tarefa, inicio, fim) {
+    if (!Number.isFinite(inicio) || !Number.isFinite(fim)) return tarefa;
+    const novoInicio = isoDeDia(inicio);
+    const novoFim = isoDeDia(fim);
+    if (Number.isNaN(diaNumero(novoInicio)) || Number.isNaN(diaNumero(novoFim))) return tarefa;
+    return { ...tarefa, inicio: novoInicio, fim: novoFim };
+  }
+
+  function deslocarTarefa(tarefa, dias) {
+    return comDatas(tarefa, diaNumero(tarefa.inicio) + dias, diaNumero(tarefa.fim) + dias);
+  }
+
+  function redimensionarTarefa(tarefa, lado, dias) {
+    if (tarefa.tipo === 'marco') return deslocarTarefa(tarefa, dias);
+    const inicio = diaNumero(tarefa.inicio);
+    const fim = diaNumero(tarefa.fim);
+    return lado === 'inicio' ? comDatas(tarefa, Math.min(inicio + dias, fim), fim) : comDatas(tarefa, inicio, Math.max(fim + dias, inicio));
+  }
+
+  function progressoPelaPosicao(posicao, largura) {
+    const bruto = (posicao / largura) * 100;
+    return Math.min(100, Math.max(0, Math.round(bruto / 5) * 5));
+  }
+
+  function criarHistorico(limite) {
+    let anteriores = [];
+    let posteriores = [];
+    return {
+      registrar(estado) {
+        anteriores = [...anteriores, estado].slice(-limite);
+        posteriores = [];
+      },
+      desfazer(atual) {
+        if (!anteriores.length) return null;
+        posteriores = [...posteriores, atual];
+        return anteriores.pop();
+      },
+      refazer(atual) {
+        if (!posteriores.length) return null;
+        anteriores = [...anteriores, atual].slice(-limite);
+        return posteriores.pop();
+      },
+      disponivel: () => ({ desfazer: anteriores.length > 0, refazer: posteriores.length > 0 }),
+      limpar() {
+        anteriores = [];
+        posteriores = [];
+      },
+    };
+  }
+
   function compararPorData(a, b) {
     return comparar(a.inicio, b.inicio) || comparar(a.fim, b.fim) || a.nome.localeCompare(b.nome, 'pt-BR');
   }
@@ -355,6 +405,10 @@ const Cronograma = (() => {
     validarTarefa,
     ordenarTarefas,
     ordenarPorData,
+    deslocarTarefa,
+    redimensionarTarefa,
+    progressoPelaPosicao,
+    criarHistorico,
     agruparPorFase,
     moverTarefa,
     moverFase,

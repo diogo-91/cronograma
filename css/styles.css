@@ -667,6 +667,26 @@ textarea.campo { resize: vertical; }
   transition: box-shadow 0.15s, filter 0.15s;
 }
 
+.g-barra { touch-action: pan-x pan-y; }
+.g-barra, .g-marco { cursor: grab; }
+.g-barra:active, .g-marco:active { cursor: grabbing; }
+.arrastando-barra { z-index: 4; box-shadow: 0 0 0 3px var(--foco) !important; }
+.g-puxador { position: absolute; top: -3px; bottom: -3px; width: 12px; cursor: ew-resize; z-index: 2; }
+.g-puxador.inicio { left: -5px; }
+.g-puxador.fim { right: -5px; }
+.g-puxador::after { content: ""; position: absolute; top: 50%; left: 50%; width: 4px; height: 14px; margin: -7px 0 0 -2px; border-radius: 2px; background: var(--superficie); box-shadow: 0 0 0 1.5px var(--cor); opacity: 0; transition: opacity 0.15s; }
+.g-puxador-progresso { position: absolute; bottom: 0; width: 16px; height: 11px; margin-left: -8px; cursor: ew-resize; z-index: 3; opacity: 0; transition: opacity 0.15s; }
+.g-puxador-progresso::after { content: ""; position: absolute; left: 3px; bottom: 0; border: 5px solid transparent; border-top-width: 0; border-bottom: 8px solid var(--texto); }
+.g-barra:hover .g-puxador::after, .g-barra:hover .g-puxador-progresso, .g-barra:focus-visible .g-puxador::after, .g-barra:focus-visible .g-puxador-progresso, .arrastando-barra .g-puxador::after { opacity: 1; }
+.historico button { display: inline-grid; place-items: center; padding: 4px 10px; }
+.historico button svg { width: 17px; height: 17px; }
+@media (pointer: coarse) {
+  .g-puxador { width: 22px; }
+  .g-puxador.inicio { left: -11px; }
+  .g-puxador.fim { right: -11px; }
+  .g-puxador::after { opacity: 0.8; }
+}
+
 .g-barra:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cor) 50%, transparent), 0 6px 16px color-mix(in srgb, var(--cor) 30%, transparent); }
 .g-barra.atrasada { box-shadow: inset 0 0 0 2px var(--st-atrasada); }
 .g-progresso {
@@ -969,6 +989,7 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 2
   .modos { gap: 8px; }
   .segmentado { flex: 1 1 auto; }
   .segmentado button { flex: 1 1 auto; padding: 4px 8px; font-size: 0.85rem; }
+  .segmentado.historico { flex: 0 0 auto; }
 
   .gantt { max-height: none; }
   .g-nome { padding: 6px 8px 6px 10px; }

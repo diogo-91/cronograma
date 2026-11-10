@@ -340,3 +340,59 @@ test('moverTarefa da única atividade do grupo para o próprio grupo não muda a
   const r = C.moverTarefa(comFases(), 'o1', 'Obra', null);
   assert.deepEqual(C.agruparPorFase(r, HOJE).map((g) => g.fase), ['Projeto', 'Obra', '']);
 });
+
+test('deslocarTarefa move início e fim juntos, atravessando o mês', () => {
+  const r = C.deslocarTarefa(tarefa({ inicio: '2026-10-29', fim: '2026-10-31' }), 3);
+  assert.equal(r.inicio, '2026-11-01');
+  assert.equal(r.fim, '2026-11-03');
+  const voltar = C.deslocarTarefa(tarefa({ inicio: '2026-10-05', fim: '2026-10-06' }), -5);
+  assert.deepEqual([voltar.inicio, voltar.fim], ['2026-09-30', '2026-10-01']);
+});
+
+test('redimensionarTarefa muda uma ponta e nunca deixa o término antes do início', () => {
+  const base = tarefa({ inicio: '2026-10-10', fim: '2026-10-15' });
+  assert.equal(C.redimensionarTarefa(base, 'fim', 2).fim, '2026-10-17');
+  assert.equal(C.redimensionarTarefa(base, 'inicio', -3).inicio, '2026-10-07');
+  assert.deepEqual([C.redimensionarTarefa(base, 'fim', -10).inicio, C.redimensionarTarefa(base, 'fim', -10).fim], ['2026-10-10', '2026-10-10']);
+  assert.deepEqual([C.redimensionarTarefa(base, 'inicio', 10).inicio, C.redimensionarTarefa(base, 'inicio', 10).fim], ['2026-10-15', '2026-10-15']);
+});
+
+test('marco só se desloca: esticar um marco move a data', () => {
+  const marco = tarefa({ tipo: 'marco', inicio: '2026-10-10', fim: '2026-10-10' });
+  const r = C.redimensionarTarefa(marco, 'fim', 4);
+  assert.deepEqual([r.inicio, r.fim], ['2026-10-14', '2026-10-14']);
+});
+
+test('datas fora do intervalo permitido não são aplicadas', () => {
+  const base = tarefa({ inicio: '2199-12-30', fim: '2199-12-31' });
+  assert.equal(C.deslocarTarefa(base, 5), base);
+  assert.equal(C.redimensionarTarefa(base, 'fim', 5), base);
+});
+
+test('progressoPelaPosicao arredonda de 5 em 5 e fica entre 0 e 100', () => {
+  assert.equal(C.progressoPelaPosicao(37, 100), 35);
+  assert.equal(C.progressoPelaPosicao(38, 100), 40);
+  assert.equal(C.progressoPelaPosicao(-20, 100), 0);
+  assert.equal(C.progressoPelaPosicao(500, 100), 100);
+});
+
+test('histórico desfaz e refaz em ordem, limpa o refazer ao registrar e respeita o limite', () => {
+  const h = C.criarHistorico(2);
+  assert.deepEqual(h.disponivel(), { desfazer: false, refazer: false });
+  h.registrar('v1');
+  h.registrar('v2');
+  assert.equal(h.desfazer('v3'), 'v2');
+  assert.equal(h.desfazer('v2'), 'v1');
+  assert.equal(h.desfazer('v1'), null);
+  assert.equal(h.refazer('v1'), 'v2');
+  h.registrar('outra');
+  assert.equal(h.refazer('x'), null, 'nova alteração apaga o refazer');
+  h.registrar('a');
+  h.registrar('b');
+  h.registrar('c');
+  assert.equal(h.desfazer('d'), 'c');
+  assert.equal(h.desfazer('c'), 'b');
+  assert.equal(h.desfazer('b'), null, 'limite de 2 descarta os mais antigos');
+  h.limpar();
+  assert.deepEqual(h.disponivel(), { desfazer: false, refazer: false });
+});

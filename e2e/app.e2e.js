@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { criarServidor } = require('../servidor.js');
+const C = require('../js/cronograma.js');
 
 const SENHA = 'senha-do-teste-e2e';
 const OUT = path.join(__dirname, 'saida');
@@ -670,6 +671,104 @@ fs.mkdirSync(OUT, { recursive: true });
   await gr.page.click('[data-acao=ordenar-data]');
   await aguardarSalvo(gr.page);
   assert.equal((await fasesNaTela(gr.page))[0], 'Planejamento', 'ordem por data volta Planejamento ao topo');
+
+  // etapa 2: arrastar barras, puxar pontas e progresso, teclado, desfazer e refazer
+  const curta = (n) => C.formatarData(C.isoDeDia(C.diaNumero(C.hojeISO()) + n)).slice(0, 5);
+  const br = await nova({ viewport: { width: 1366, height: 1400 } });
+  const URL_BARRAS = await novoServidor();
+  await entrar(br.page, URL_BARRAS);
+  await br.page.click('text=Ver um exemplo');
+  await aguardarSalvo(br.page);
+  await br.page.click('[data-zoom=dia]');
+  const datasDe = (nome) => br.page.locator(`.g-linha:has(.g-nome-texto:text-is("${nome}")) .g-nome-datas`).textContent();
+  const barraDe = (nome) => `[data-barra][aria-label^="${nome}:"], [data-barra][aria-label^="Marco ${nome}:"]`;
+  const arrastarX = async (sel, dx, ponto = 'meio', dy = 0) => {
+    if (typeof ponto === 'string') await br.page.locator(sel).scrollIntoViewIfNeeded();
+    const b = await br.page.locator(sel).boundingBox();
+    const x = ponto === 'meio' ? b.x + b.width / 2 : ponto === 'fim' ? b.x + b.width - 2 : ponto === 'inicio' ? b.x + 2 : ponto;
+    const y = b.y + b.height / 2 + dy;
+    await br.page.mouse.move(x, y);
+    await br.page.mouse.down();
+    for (let i = 1; i <= 6; i++) await br.page.mouse.move(x + (dx * i) / 6, y);
+    await br.page.mouse.up();
+  };
+  assert.equal(await datasDe('Front-end'), `${curta(3)} – ${curta(17)}`);
+  await arrastarX(barraDe('Front-end'), 72);
+  await aguardarSalvo(br.page);
+  assert.equal(await datasDe('Front-end'), `${curta(5)} – ${curta(19)}`, 'arrastar move 2 dias');
+  assert.equal(await br.page.isVisible('#dialogo'), false, 'arrastar não abre o editor');
+  await arrastarX(barraDe('Front-end'), 108, 'fim');
+  await aguardarSalvo(br.page);
+  assert.equal(await datasDe('Front-end'), `${curta(5)} – ${curta(22)}`, 'ponta direita muda o término');
+  await arrastarX(barraDe('Front-end'), -36, 'inicio');
+  await aguardarSalvo(br.page);
+  assert.equal(await datasDe('Front-end'), `${curta(4)} – ${curta(22)}`, 'ponta esquerda muda o início');
+  await br.page.hover(barraDe('Front-end'));
+  const fb = await br.page.locator(barraDe('Front-end')).boundingBox();
+  await arrastarX(barraDe('Front-end'), fb.width / 2, fb.x + 2, fb.height / 2 - 3);
+  await aguardarSalvo(br.page);
+  assert.match(await br.page.getAttribute(barraDe('Front-end'), 'aria-label'), /50% concluído/, 'puxador de progresso');
+  await br.page.screenshot({ path: path.join(OUT, '21-arrastar-barras.png') });
+
+  await br.page.focus(barraDe('Testes e ajustes'));
+  await br.page.keyboard.press('ArrowRight');
+  await br.page.keyboard.press('Shift+ArrowRight');
+  await aguardarSalvo(br.page);
+  assert.equal(await datasDe('Testes e ajustes'), `${curta(19)} – ${curta(26)}`, 'setas movem e Shift muda o término');
+  await arrastarX(barraDe('Publicação no ar'), 36);
+  await aguardarSalvo(br.page);
+  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(26)} · marco`), 'marco arrastado 1 dia');
+
+  await br.page.keyboard.press('Control+z');
+  await aguardarSalvo(br.page);
+  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(25)} · marco`), 'Ctrl+Z desfaz o marco');
+  await br.page.click('#btn-desfazer');
+  await aguardarSalvo(br.page);
+  assert.equal(await datasDe('Testes e ajustes'), `${curta(19)} – ${curta(25)}`, 'botão desfaz o Shift+seta');
+  await br.page.click('#btn-refazer');
+  await aguardarSalvo(br.page);
+  assert.equal(await datasDe('Testes e ajustes'), `${curta(19)} – ${curta(26)}`, 'refazer');
+  await br.page.click('#btn-refazer');
+  await aguardarSalvo(br.page);
+  assert.match(await datasDe('Publicação no ar'), new RegExp(`^${curta(26)} · marco`), 'refazer o marco');
+  assert.equal(await br.page.isDisabled('#btn-refazer'), true, 'nada mais para refazer');
+
+  await br.page.click(barraDe('Wireframes'));
+  assert.equal(await br.page.isVisible('#dialogo'), true, 'clique sem arrastar abre o editor');
+  await br.page.click('#dialogo [data-fechar].btn');
+
+  // toque: segurar e arrastar move; arrastar logo de cara é rolagem e não mexe
+  const tocar = (sel, segurarMs, passos) => br.page.evaluate(async ([sel, segurarMs, passos]) => {
+    const b = document.querySelector(sel);
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const disparar = (tipo, dx) => b.dispatchEvent(new PointerEvent(tipo, { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0, clientX: x + dx, clientY: y }));
+    disparar('pointerdown', 0);
+    await new Promise((ok) => setTimeout(ok, segurarMs));
+    for (const dx of passos) disparar('pointermove', dx);
+    disparar('pointerup', passos[passos.length - 1]);
+  }, [sel, segurarMs, passos]);
+  await tocar(barraDe('Divulgação'), 50, [20, 72]);
+  await br.page.waitForTimeout(600);
+  assert.equal(await datasDe('Divulgação'), `${curta(26)} – ${curta(33)}`, 'deslizar sem segurar não move (é rolagem)');
+  await tocar(barraDe('Divulgação'), 450, [20, 72]);
+  await aguardarSalvo(br.page);
+  assert.equal(await datasDe('Divulgação'), `${curta(28)} – ${curta(35)}`, 'segurar e arrastar move pelo toque');
+
+  await br.page.reload();
+  await br.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await datasDe('Front-end'), `${curta(4)} – ${curta(22)}`, 'datas arrastadas ficaram no servidor');
+  await arrastarX(barraDe('Front-end'), 36);
+  await aguardarSalvo(br.page);
+  assert.equal(await br.page.isDisabled('#btn-desfazer'), false);
+  const outroBr = await nova({ viewport: { width: 1366, height: 900 } });
+  await entrar(outroBr.page, URL_BARRAS);
+  await outroBr.page.fill('#titulo', 'Editado em outro aparelho');
+  await aguardarSalvo(outroBr.page);
+  await br.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await br.page.waitForFunction(() => document.querySelector('#titulo').value === 'Editado em outro aparelho');
+  assert.equal(await br.page.isDisabled('#btn-desfazer'), true, 'versão de outro aparelho zera o histórico');
 
   // sair volta para a tela de senha
   await page.click('#menu summary');

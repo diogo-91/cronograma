@@ -77,6 +77,7 @@
   let nomeAntesDeEditar = '';
   let checklistEditado = [];
   let recolhidasPorEmpresa = {};
+  const historico = C.criarHistorico(50);
   const gravacoesSemResposta = new Set();
 
   function el(tag, props = {}, ...filhos) {
@@ -152,7 +153,116 @@
     revisao = doc.revisao;
     estado.titulo = doc.titulo;
     estado.tarefas = comOrdem(doc.tarefas);
+    historico.limpar();
   }
+
+  function registrarHistorico() {
+    historico.registrar(structuredClone(estado.tarefas));
+  }
+
+  function voltarNoHistorico(direcao) {
+    const atual = structuredClone(estado.tarefas);
+    const restaurado = direcao === 'desfazer' ? historico.desfazer(atual) : historico.refazer(atual);
+    if (!restaurado) return;
+    estado.tarefas = restaurado;
+    salvar();
+    render();
+    avisar(direcao === 'desfazer' ? 'Alteração desfeita.' : 'Alteração refeita.');
+  }
+
+  function aplicarAlteracaoTarefa(nova) {
+    const indice = estado.tarefas.findIndex((t) => t.id === nova.id);
+    if (indice < 0) return;
+    registrarHistorico();
+    estado.tarefas[indice] = nova;
+    salvar();
+    render();
+  }
+
+  function moverBarraPeloTeclado(ev, tarefa) {
+    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+    ev.preventDefault();
+    const dias = ev.key === 'ArrowRight' ? 1 : -1;
+    const nova = ev.shiftKey ? C.redimensionarTarefa(tarefa, 'fim', dias) : C.deslocarTarefa(tarefa, dias);
+    if (nova === tarefa) return;
+    aplicarAlteracaoTarefa(nova);
+    [...document.querySelectorAll('[data-barra]')].find((b) => b.dataset.barra === tarefa.id)?.focus();
+  }
+
+  function iniciarArrasteBarra(ev, tarefa, pxDia) {
+    if (ev.button !== 0) return;
+    const barra = ev.currentTarget;
+    const marco = tarefa.tipo === 'marco';
+    const modo = marco ? 'mover' : ev.target.dataset.lado || 'mover';
+    const rotulo = barra.querySelector('.g-rotulo');
+    const caixa = barra.getBoundingClientRect();
+    const leftOriginal = parseFloat(barra.style.left);
+    const inicioX = ev.clientX;
+    const inicioY = ev.clientY;
+    const toque = ev.pointerType === 'touch';
+    let ativo = !toque;
+    let movido = false;
+    let resultado = null;
+    let espera = null;
+    if (toque) {
+      espera = setTimeout(() => {
+        ativo = true;
+        barra.classList.add('arrastando-barra');
+        navigator.vibrate?.(10);
+      }, 350);
+    } else {
+      ev.preventDefault();
+      barra.classList.add('arrastando-barra');
+    }
+    try {
+      barra.setPointerCapture(ev.pointerId);
+    } catch {}
+    const bloquearRolagem = (e) => {
+      if (ativo) e.preventDefault();
+    };
+    const mover = (e) => {
+      const dx = e.clientX - inicioX;
+      if (!ativo) {
+        if (Math.abs(dx) > 8 || Math.abs(e.clientY - inicioY) > 8) encerrar(false);
+        return;
+      }
+      if (!movido && Math.abs(dx) < 4) return;
+      movido = true;
+      if (modo === 'progresso') {
+        const progresso = C.progressoPelaPosicao(e.clientX - caixa.left, caixa.width);
+        barra.querySelector('.g-progresso').style.setProperty('width', `${progresso}%`);
+        barra.querySelector('.g-puxador-progresso').style.setProperty('left', `${progresso}%`);
+        rotulo.textContent = `${progresso}%`;
+        resultado = { ...tarefa, progresso };
+        return;
+      }
+      const dias = Math.round(dx / pxDia);
+      resultado = modo === 'mover' ? C.deslocarTarefa(tarefa, dias) : C.redimensionarTarefa(tarefa, modo, dias);
+      const deslocamento = (C.diaNumero(resultado.inicio) - C.diaNumero(tarefa.inicio)) * pxDia;
+      barra.style.setProperty('left', `${leftOriginal + deslocamento}px`);
+      if (!marco) barra.style.setProperty('width', `${C.duracaoDias(resultado) * pxDia}px`);
+      rotulo.textContent = marco ? dataCurta(resultado.inicio) : `${dataCurta(resultado.inicio)} – ${dataCurta(resultado.fim)}`;
+    };
+    function encerrar(aplicar) {
+      clearTimeout(espera);
+      barra.removeEventListener('pointermove', mover);
+      barra.removeEventListener('pointerup', aoSoltar);
+      barra.removeEventListener('pointercancel', aoCancelar);
+      document.removeEventListener('touchmove', bloquearRolagem);
+      barra.classList.remove('arrastando-barra');
+      if (!movido) return;
+      const mudou = resultado && (resultado.inicio !== tarefa.inicio || resultado.fim !== tarefa.fim || resultado.progresso !== tarefa.progresso);
+      if (aplicar && mudou) aplicarAlteracaoTarefa(resultado);
+      else render();
+    }
+    const aoSoltar = () => encerrar(true);
+    const aoCancelar = () => encerrar(false);
+    barra.addEventListener('pointermove', mover);
+    barra.addEventListener('pointerup', aoSoltar);
+    barra.addEventListener('pointercancel', aoCancelar);
+    document.addEventListener('touchmove', bloquearRolagem, { passive: false });
+  }
+
 
   function tratarFalhaDeCarga(status) {
     if (status === 401) mostrarLogin();
@@ -400,6 +510,9 @@
     document.title = `${estado.titulo.trim() || TITULO_PADRAO} · Cronograma`;
     if (document.activeElement !== $('#titulo')) $('#titulo').value = estado.titulo;
     renderEmpresas();
+    const { desfazer, refazer } = historico.disponivel();
+    $('#btn-desfazer').disabled = !desfazer;
+    $('#btn-refazer').disabled = !refazer;
     for (const b of document.querySelectorAll('[data-visao]')) b.setAttribute('aria-pressed', String(b.dataset.visao === estado.visao));
 
     $('#resumo').hidden = semTarefas;
@@ -516,6 +629,7 @@
     const antes = C.ordenarTarefas(estado.tarefas).map((t) => `${t.id}:${t.fase}`).join('|');
     const depois = C.ordenarTarefas(novas).map((t) => `${t.id}:${t.fase}`).join('|');
     if (antes === depois) return;
+    registrarHistorico();
     estado.tarefas = novas;
     salvar();
     render();
@@ -643,9 +757,12 @@
             type: 'button',
             class: `g-marco ${status}`,
             style: { left: px(barra.left + e.pxDia / 2) },
-            title: descricao,
-            'aria-label': descricao,
+            title: `${descricao}. Arraste para mudar a data.`,
+            'aria-label': `${descricao}. Setas para os lados mudam a data.`,
+            'data-barra': t.id,
             onclick: () => abrirEditor(t.id),
+            onpointerdown: (ev) => iniciarArrasteBarra(ev, t, e.pxDia),
+            onkeydown: (ev) => moverBarraPeloTeclado(ev, t),
           },
           el('span', { class: 'g-losango' }),
           el('span', { class: 'g-rotulo' }, status === 'atrasada' ? `${dataCurta(t.inicio)} · atrasado` : dataCurta(t.inicio)))
@@ -653,11 +770,17 @@
             type: 'button',
             class: `g-barra ${status}`,
             style: { left: px(barra.left), width: px(barra.width) },
-            title: descricao,
-            'aria-label': descricao,
+            title: `${descricao}. Arraste para mover; puxe as pontas para mudar as datas.`,
+            'aria-label': `${descricao}. Setas para os lados movem 1 dia; com Shift, mudam o término.`,
+            'data-barra': t.id,
             onclick: () => abrirEditor(t.id),
+            onpointerdown: (ev) => iniciarArrasteBarra(ev, t, e.pxDia),
+            onkeydown: (ev) => moverBarraPeloTeclado(ev, t),
           },
           el('span', { class: 'g-progresso', style: { width: `${t.progresso}%` } }),
+          barra.width >= 24 && el('span', { class: 'g-puxador inicio', 'data-lado': 'inicio', title: 'Puxe para mudar o início' }),
+          barra.width >= 24 && el('span', { class: 'g-puxador fim', 'data-lado': 'fim', title: 'Puxe para mudar o término' }),
+          barra.width >= 24 && el('span', { class: 'g-puxador-progresso', 'data-lado': 'progresso', title: 'Puxe para mudar o progresso', style: { left: `${t.progresso}%` } }),
           el('span', { class: 'g-rotulo' }, status === 'atrasada' ? `${t.progresso}% · atrasada` : `${t.progresso}%`));
       return el('div', { class: 'g-linha', style: { '--cor': corDa(t, cores) }, 'data-arrastavel': 'tarefa', 'data-id': t.id, 'data-fase': t.fase },
         el('div', { class: 'g-nome' },
@@ -979,6 +1102,7 @@
       form.querySelector('[aria-invalid="true"]').focus();
       return;
     }
+    registrarHistorico();
     const indice = estado.tarefas.findIndex((t) => t.id === estado.editando);
     const tarefa = { id: indice >= 0 ? estado.editando : C.novoId(), ...r.tarefa };
     if (indice >= 0) estado.tarefas[indice] = tarefa;
@@ -1006,6 +1130,7 @@
       avisar('Essa atividade já tinha sido excluída.');
       return;
     }
+    registrarHistorico();
     const [removida] = estado.tarefas.splice(indice, 1);
     const gravacao = salvar();
     render();
@@ -1015,9 +1140,7 @@
       avisar(`"${removida.nome}" excluída.`, {
         rotulo: 'Desfazer',
         executar: () => {
-          estado.tarefas.push(removida);
-          salvar();
-          render();
+          voltarNoHistorico('desfazer');
           focarTarefa(removida.id);
         },
       });
@@ -1027,6 +1150,7 @@
   function duplicar(id) {
     const original = estado.tarefas.find((t) => t.id === id);
     if (!original) return;
+    registrarHistorico();
     const copia = {
       ...original,
       id: C.novoId(),
@@ -1054,6 +1178,7 @@
   }
 
   function substituirTudo(titulo, tarefas) {
+    registrarHistorico();
     estado.titulo = titulo;
     estado.tarefas = comOrdem(tarefas);
     zerarFiltros();
@@ -1139,15 +1264,11 @@
     },
     'ordenar-data': () => {
       if (!estado.tarefas.length) return;
-      const anteriores = estado.tarefas;
+      registrarHistorico();
       estado.tarefas = C.ordenarPorData(estado.tarefas);
       salvar().then((ok) => ok && avisar('Atividades ordenadas por data de início.', {
         rotulo: 'Desfazer',
-        executar: () => {
-          estado.tarefas = anteriores;
-          salvar();
-          render();
-        },
+        executar: () => voltarNoHistorico('desfazer'),
       }));
       render();
     },
@@ -1285,6 +1406,21 @@
   });
   $('#arquivo').addEventListener('change', importarArquivo);
 
+  $('#btn-desfazer').addEventListener('click', () => voltarNoHistorico('desfazer'));
+  $('#btn-refazer').addEventListener('click', () => voltarNoHistorico('refazer'));
+  document.addEventListener('keydown', (ev) => {
+    if (!(ev.ctrlKey || ev.metaKey) || document.body.dataset.tela !== 'app' || dialogo.open) return;
+    const alvo = ev.target;
+    if (alvo.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo.tagName)) return;
+    const tecla = ev.key.toLowerCase();
+    if (tecla === 'z' && !ev.shiftKey) {
+      ev.preventDefault();
+      voltarNoHistorico('desfazer');
+    } else if ((tecla === 'z' && ev.shiftKey) || tecla === 'y') {
+      ev.preventDefault();
+      voltarNoHistorico('refazer');
+    }
+  });
   form.addEventListener('submit', salvarEditor);
   $('#f-marco').addEventListener('change', aplicarTipoNoEditor);
   document.execCommand('styleWithCSS', false, false);
