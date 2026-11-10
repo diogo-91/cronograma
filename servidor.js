@@ -371,6 +371,7 @@ function criarServidor({ senha, pastaDados }) {
         if (!auth.tokenValido(lerCookie(req, 'sessao'), agoraS())) throw new ErroHttp(401, 'Entre com a senha para continuar.');
         if (rota === 'GET /api/empresas') return listarEmpresas(res);
         if (rota === 'POST /api/empresas') return await criarEmpresa(req, res);
+        if (rota === 'GET /api/geral') return responderJson(res, 200, { empresas: armazenamento.atual().empresas.map((e) => ({ id: e.id, nome: e.nome, tarefas: e.tarefas, calendario: e.calendario })) });
         const [, id] = ROTA_EMPRESA.exec(caminho) || [];
         if (id && req.method === 'GET') return responderJson(res, 200, cronogramaDa(buscarEmpresa(id)));
         if (id && req.method === 'PUT') return await salvar(req, res, id);

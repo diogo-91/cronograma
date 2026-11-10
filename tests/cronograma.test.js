@@ -608,3 +608,27 @@ test('importarDados traz calendário e linha de base do backup, validados', () =
   assert.equal(antigo.dados.calendario, null, 'backup antigo sem calendário não impõe um');
   assert.equal(antigo.dados.linhaBase, null);
 });
+
+test('visaoGeral junta as empresas com resumo de cada uma, atrasadas e ids sem colisão', () => {
+  const hoje = '2026-11-10';
+  const empresas = [
+    { id: 'e1', nome: 'Alfa', tarefas: [
+      tarefa({ id: 'x', nome: 'Painel', responsavel: 'Ana', inicio: '2026-11-02', fim: '2026-11-06', progresso: 50 }),
+      tarefa({ id: 'y', nome: 'Motor', responsavel: 'Ana', inicio: '2026-11-09', fim: '2026-11-12', progresso: 0 }),
+    ] },
+    { id: 'e2', nome: 'Beta', tarefas: [
+      tarefa({ id: 'x', nome: 'Bomba', responsavel: 'Ana', inicio: '2026-11-01', fim: '2026-11-03', progresso: 10 }),
+    ] },
+    { id: 'e3', nome: 'Gama', tarefas: [] },
+  ];
+  const g = C.visaoGeral(empresas, hoje);
+  assert.equal(g.resumo.total, 3);
+  assert.equal(g.resumo.atrasadas, 2);
+  assert.equal(g.resumo.inicio, '2026-11-01');
+  assert.deepEqual(g.empresas.map((e) => [e.nome, e.resumo.total, e.resumo.atrasadas]), [['Alfa', 2, 1], ['Beta', 1, 1], ['Gama', 0, 0]]);
+  assert.deepEqual(g.atrasadas.map((a) => [a.empresa.nome, a.tarefa.nome]), [['Beta', 'Bomba'], ['Alfa', 'Painel']], 'mais antiga primeiro');
+  assert.equal(new Set(g.tarefas.map((t) => t.id)).size, 3, 'mesmo id em empresas diferentes não colide');
+  const ana = C.cargaPorResponsavel(g.tarefas).pessoas[0];
+  assert.equal(ana.celulas.length, 3, '01/11 é domingo: semanas de 26/10, 02/11 e 09/11');
+  assert.deepEqual(ana.celulas[1], { pico: 2, tarefas: ['e1:x', 'e2:x'] }, 'Ana: Painel (Alfa) e Bomba (Beta) no mesmo dia');
+});

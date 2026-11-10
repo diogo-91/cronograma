@@ -360,3 +360,16 @@ test('linha de base da empresa é gravada, validada e mantida quando o envio nã
   await api(base, cookie, 'PUT', { revisaoBase: 2, titulo: 'x', tarefas: [], linhaBase: null });
   assert.equal((await (await api(base, cookie)).json()).linhaBase, null, 'null remove a linha de base');
 });
+
+test('visão geral devolve todas as empresas com atividades e exige sessão', async (t) => {
+  const { base } = await subir(t);
+  assert.equal((await fetch(`${base}/api/geral`)).status, 401);
+  const { cookie } = await entrar(base);
+  await api(base, cookie, 'PUT', { revisaoBase: 0, titulo: 'Alfa', tarefas: [{ id: 'a', nome: 'A', inicio: '2026-11-09', fim: '2026-11-10' }] });
+  await fetch(`${base}/api/empresas`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: 'Beta' }) });
+  const r = await fetch(`${base}/api/geral`, { headers: { Cookie: cookie } });
+  assert.equal(r.status, 200);
+  const { empresas } = await r.json();
+  assert.deepEqual(empresas.map((e) => [e.nome, e.tarefas.length]), [['Alfa', 1], ['Beta', 0]]);
+  assert.ok(empresas.every((e) => typeof e.id === 'string' && e.calendario));
+});

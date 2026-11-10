@@ -565,6 +565,19 @@ const Cronograma = (() => {
     return r;
   }
 
+  function visaoGeral(empresas, hoje) {
+    const tarefas = empresas.flatMap((e) => e.tarefas.map((t) => ({ ...t, id: `${e.id}:${t.id}`, empresa: e.id })));
+    const atrasadas = empresas
+      .flatMap((empresa) => empresa.tarefas.filter((t) => statusTarefa(t, hoje) === 'atrasada').map((t) => ({ empresa, tarefa: t })))
+      .sort((a, b) => comparar(a.tarefa.fim, b.tarefa.fim) || a.empresa.nome.localeCompare(b.empresa.nome, 'pt-BR'));
+    return {
+      resumo: resumo(tarefas, hoje),
+      empresas: empresas.map((e) => ({ id: e.id, nome: e.nome, resumo: resumo(e.tarefas, hoje) })),
+      atrasadas,
+      tarefas,
+    };
+  }
+
   function zoomEfetivo(tarefas, zoomPedido) {
     if (!tarefas.length) return zoomPedido;
     const dias = Math.max(...tarefas.map((t) => diaNumero(t.fim))) - Math.min(...tarefas.map((t) => diaNumero(t.inicio))) + 1;
@@ -738,6 +751,7 @@ const Cronograma = (() => {
     moverFase,
     filtrarTarefas,
     resumo,
+    visaoGeral,
     zoomEfetivo,
     escalaGantt,
     paraCSV,
