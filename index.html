@@ -16,10 +16,13 @@
     </div>
     <div class="topo-titulo">
       <div class="empresa-linha">
+        <h1 class="titulo titulo-geral">Visão geral</h1>
         <input id="titulo" class="titulo" type="text" maxlength="80" aria-label="Nome da empresa" autocomplete="off">
         <details class="menu menu-empresas" id="menu-empresas">
           <summary class="btn btn-empresas" title="Trocar de empresa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 8h3M8 12h3M8 16h3"/></svg><span>Empresas</span></summary>
           <div class="menu-itens">
+            <button type="button" id="btn-visao-geral" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Visão geral (todas)</button>
+            <hr>
             <div class="menu-rotulo">Empresas</div>
             <div id="lista-empresas" class="lista-empresas"></div>
             <hr>
@@ -109,6 +112,16 @@
     <section id="vista-tabela" class="lista" aria-label="Lista de atividades"></section>
     <section id="vista-carga" class="vista-carga" aria-label="Carga por responsável" hidden></section>
     <section id="vazio" class="vazio" hidden></section>
+  </main>
+
+  <main class="conteudo conteudo-geral" aria-label="Visão geral de todas as empresas">
+    <section class="resumo" id="geral-resumo" aria-label="Resumo de todas as empresas"></section>
+    <h2 class="geral-titulo">Empresas</h2>
+    <section id="geral-gantt" class="gantt gantt-geral" aria-label="Período de cada empresa" tabindex="0"></section>
+    <h2 class="geral-titulo" id="geral-atrasadas-titulo">Atrasadas</h2>
+    <section id="geral-atrasadas" class="geral-atrasadas" aria-labelledby="geral-atrasadas-titulo"></section>
+    <h2 class="geral-titulo">Carga da equipe em todas as empresas</h2>
+    <section id="geral-carga" class="vista-carga" aria-label="Carga da equipe em todas as empresas"></section>
   </main>
 
   <dialog id="dialogo-calendario" aria-labelledby="dialogo-calendario-titulo">

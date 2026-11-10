@@ -76,6 +76,7 @@
   let temporizadorGravar = null;
   let geracaoSessao = 0;
   let empresas = [];
+  let geral = [];
   let empresaAtual = null;
   let empresaPreferida = null;
   let nomeAntesDeEditar = '';
@@ -501,22 +502,119 @@
 
   async function trocarEmpresa(id) {
     $('#menu-empresas').open = false;
-    if (id === empresaAtual) return;
+    if (id === empresaAtual && document.body.dataset.tela === 'app') return;
     if (alteracoesPendentes || envioEmCurso) {
       enviar();
       avisar('Salvando as alterações desta empresa. Tente trocar de novo em instantes.');
       return;
     }
     if (!(await carregarDoServidor(id))) return;
+    mostrarTela('app');
     zerarFiltros();
     rolarParaHoje = true;
     render();
     window.scrollTo(0, 0);
   }
 
+  async function carregarGeral() {
+    const r = await chamarApi('GET', 'api/geral');
+    if (r.status === 401) mostrarLogin();
+    if (r.status !== 200) return false;
+    geral = r.dados.empresas;
+    empresas = geral.map((e) => ({ id: e.id, nome: e.nome, atividades: e.tarefas.length }));
+    return true;
+  }
+
+  async function abrirVisaoGeral() {
+    $('#menu-empresas').open = false;
+    if (alteracoesPendentes || envioEmCurso) {
+      enviar();
+      avisar('Salvando as alterações desta empresa. Tente abrir a visão geral de novo em instantes.');
+      return;
+    }
+    if (!(await carregarGeral())) {
+      if (document.body.dataset.tela !== 'login') avisar('Não foi possível carregar a visão geral. Verifique a conexão.');
+      return;
+    }
+    mostrarTela('geral');
+    renderGeral();
+    window.scrollTo(0, 0);
+  }
+
+  function renderGeral() {
+    const hoje = C.hojeISO();
+    const g = C.visaoGeral(geral, hoje);
+    document.title = 'Visão geral · Cronograma';
+    renderEmpresas();
+    renderResumo(g.resumo, { rotulo: 'Progresso de todas as empresas', alvo: $('#geral-resumo'), diasUteis: false });
+    renderGanttEmpresas(g, hoje);
+    renderAtrasadas(g, hoje);
+    const nomeEmpresa = new Map(geral.map((e) => [e.id, e.nome]));
+    renderCarga(g.tarefas.map((t) => ({ ...t, nome: `${t.nome} (${nomeEmpresa.get(t.empresa)})` })), hoje, { alvo: $('#geral-carga'), calendario: null });
+  }
+
+  function renderGanttEmpresas(g, hoje) {
+    const caixa = $('#geral-gantt');
+    const comDatas = g.empresas.filter((e) => e.resumo.total);
+    const e = C.escalaGantt(comDatas.map((x) => ({ id: x.id, inicio: x.resumo.inicio, fim: x.resumo.fim })), 'semana', hoje);
+    const { fundo, escala, hojeX, posicaoDe } = linhaDoTempo(e, hoje, []);
+    const linhas = g.empresas.map((x, i) => {
+      const r = x.resumo;
+      const contagem = r.total ? `${r.total} ${r.total === 1 ? 'atividade' : 'atividades'}` : 'sem atividades';
+      const descricao = r.total
+        ? `${x.nome}: ${C.formatarData(r.inicio)} a ${C.formatarData(r.fim)}, ${r.progressoGeral}% concluído, ${r.atrasadas} ${r.atrasadas === 1 ? 'atrasada' : 'atrasadas'}. Abrir o cronograma.`
+        : `${x.nome}: sem atividades. Abrir o cronograma.`;
+      return el('div', { class: 'g-linha', style: { '--cor': `var(--fase-${i % NUM_CORES})` }, 'data-empresa': x.id },
+        el('div', { class: 'g-nome' },
+          el('button', { type: 'button', class: 'g-nome-abrir empresa', title: descricao, onclick: () => trocarEmpresa(x.id) },
+            el('span', { class: 'g-nome-texto' }, x.nome),
+            el('span', { class: 'g-nome-datas' },
+              r.total ? `${contagem} · ${dataCurta(r.inicio)} – ${dataCurta(r.fim)}` : contagem,
+              r.atrasadas > 0 && el('span', { class: 'atrasadas' }, ` · ${r.atrasadas} ${r.atrasadas === 1 ? 'atrasada' : 'atrasadas'}`)))),
+        el('div', { class: 'g-trilho' },
+          r.total > 0 && el('button', {
+            type: 'button',
+            class: 'g-resumo g-resumo-empresa',
+            style: posicaoDe(r.inicio, r.fim),
+            title: descricao,
+            'aria-label': descricao,
+            onclick: () => trocarEmpresa(x.id),
+          },
+          el('span', { class: 'g-resumo-progresso', style: { width: `${r.progressoGeral}%` } }),
+          el('span', { class: 'g-rotulo' }, `${r.progressoGeral}%`))));
+    });
+    caixa.replaceChildren(
+      el('div', { class: 'g-grade', style: { '--largura': `${e.larguraTotal}px` } },
+        el('div', { class: 'g-cabecalho' }, el('div', { class: 'g-canto' }, 'Empresa'), escala),
+        fundo,
+        ...linhas),
+    );
+    const larguraNome = caixa.querySelector('.g-canto').offsetWidth;
+    caixa.scrollLeft = hojeX === null ? 0 : Math.max(0, hojeX - (caixa.clientWidth - larguraNome) / 3);
+  }
+
+  function renderAtrasadas(g, hoje) {
+    $('#geral-atrasadas-titulo').textContent = g.atrasadas.length ? `Atrasadas (${g.atrasadas.length})` : 'Atrasadas';
+    if (!g.atrasadas.length) {
+      $('#geral-atrasadas').replaceChildren(el('p', { class: 'vazio-geral' }, 'Nenhuma atividade atrasada em nenhuma empresa.'));
+      return;
+    }
+    const dia = C.diaNumero(hoje);
+    $('#geral-atrasadas').replaceChildren(el('ul', {}, ...g.atrasadas.map(({ empresa, tarefa }) => {
+      const dias = dia - C.diaNumero(tarefa.fim);
+      const detalhe = [empresa.nome, tarefa.responsavel, `venceu em ${C.formatarData(tarefa.fim)} (há ${dias} ${dias === 1 ? 'dia' : 'dias'})`].filter(Boolean).join(' · ');
+      return el('li', {},
+        el('button', { type: 'button', class: 'atrasada-item', title: `Abrir o cronograma de ${empresa.nome}`, onclick: () => trocarEmpresa(empresa.id) },
+          el('span', { class: 'atrasada-texto' }, el('strong', {}, tarefa.nome), el('small', {}, detalhe)),
+          el('span', { class: 'atrasada-progresso' }, `${tarefa.progresso}%`)));
+    })));
+  }
+
   function renderEmpresas() {
+    const naGeral = document.body.dataset.tela === 'geral';
+    $('#btn-visao-geral').setAttribute('aria-current', String(naGeral));
     $('#lista-empresas').replaceChildren(...empresas.map((e) => {
-      const atual = e.id === empresaAtual;
+      const atual = !naGeral && e.id === empresaAtual;
       const total = atual ? estado.tarefas.length : e.atividades;
       return el('button', { type: 'button', 'aria-current': String(atual), onclick: () => trocarEmpresa(e.id) },
         el('span', { class: 'empresa-nome' }, atual ? estado.titulo || e.nome : e.nome),
@@ -679,6 +777,10 @@
   }
 
   async function sincronizar() {
+    if (document.body.dataset.tela === 'geral') {
+      if ((await carregarGeral()) && document.body.dataset.tela === 'geral') renderGeral();
+      return;
+    }
     const ocupado = () => document.body.dataset.tela !== 'app' || alteracoesPendentes || envioEmCurso || dialogo.open;
     if (ocupado()) return;
     const revisaoAntes = revisao;
@@ -740,7 +842,7 @@
     $('#vista-tabela').hidden = vazio || estado.visao !== 'tabela';
     $('#vista-carga').hidden = vazio || estado.visao !== 'carga';
 
-    renderResumo(C.resumo(visiveis, hoje), filtrando);
+    renderResumo(C.resumo(visiveis, hoje), { rotulo: filtrando ? 'Progresso (filtrado)' : 'Progresso geral' });
     renderOpcoes(cores);
     if (vazio) renderVazio(semTarefas);
     else if (estado.visao === 'gantt') renderGantt(visiveis, cores, hoje, !filtrando);
@@ -748,21 +850,21 @@
     else renderTabela(visiveis, cores, hoje, !filtrando);
   }
 
-  function renderResumo(r, filtrando) {
+  function renderResumo(r, { rotulo, alvo = $('#resumo'), diasUteis = estado.calendario.diasUteis }) {
     const indicador = (rotulo, valor, tipo) =>
       el('div', { class: `cartao kpi kpi-${tipo}` },
         el('span', { class: 'kpi-icone' }, icone(tipo)),
         el('div', { class: 'cartao-rotulo' }, rotulo),
         el('div', { class: 'cartao-valor' }, String(valor)));
     const periodo = r.inicio
-      ? [el('span', {}, `${C.formatarData(r.inicio)} a ${C.formatarData(r.fim)}`), ' · ', el('span', {}, `${r.dias} ${r.dias === 1 ? 'dia' : 'dias'} corridos`), ...(estado.calendario.diasUteis && r.inicio ? [' · ', el('span', {}, rotuloDuracao({ inicio: r.inicio, fim: r.fim }))] : [])]
+      ? [el('span', {}, `${C.formatarData(r.inicio)} a ${C.formatarData(r.fim)}`), ' · ', el('span', {}, `${r.dias} ${r.dias === 1 ? 'dia' : 'dias'} corridos`), ...(diasUteis && r.inicio ? [' · ', el('span', {}, rotuloDuracao({ inicio: r.inicio, fim: r.fim }))] : [])]
       : ['Sem atividades'];
-    $('#resumo').replaceChildren(
+    alvo.replaceChildren(
       el('div', { class: 'cartao cartao-progresso' },
         el('div', { class: 'anel', style: { '--p': r.progressoGeral }, role: 'img', 'aria-label': `${r.progressoGeral}% concluído` },
           el('span', { class: 'anel-valor' }, `${r.progressoGeral}%`)),
         el('div', { class: 'progresso-texto' },
-          el('div', { class: 'cartao-rotulo' }, filtrando ? 'Progresso (filtrado)' : 'Progresso geral'),
+          el('div', { class: 'cartao-rotulo' }, rotulo),
           el('div', { class: 'progresso-frase' }, `${r.concluidas} de ${r.total} ${r.total === 1 ? 'atividade concluída' : 'atividades concluídas'}`),
           el('div', { class: 'periodo' }, ...periodo))),
       indicador('Atividades', r.total, 'atividades'),
@@ -931,31 +1033,20 @@
     alvo.addEventListener('pointercancel', () => encerrar(false), { once: true });
   }
 
-  function renderGantt(lista, cores, hoje, podeArrastar) {
-    const base = new Map((estado.linhaBase?.tarefas || []).map((b) => [b.id, b]));
-    const planejadas = lista.filter((t) => base.has(t.id)).map((t) => ({ id: `base:${t.id}`, inicio: base.get(t.id).inicio, fim: base.get(t.id).fim }));
-    const alcance = [...lista, ...planejadas];
-    const e = C.escalaGantt(alcance, estado.zoom, hoje);
-    const criticas = estado.critico ? C.caminhoCritico(estado.tarefas, estado.calendario) : new Set();
-    $('#btn-critico').setAttribute('aria-pressed', String(estado.critico));
+  function linhaDoTempo(e, hoje, feriados) {
     const px = (n) => `${n}px`;
-    hojeNoGantt = e.hojeLeft === null ? null : e.hojeLeft + e.pxDia / 2;
-    for (const b of document.querySelectorAll('[data-zoom]')) {
-      b.setAttribute('aria-pressed', String(b.dataset.zoom === e.zoom));
-      b.disabled = C.zoomEfetivo(alcance, b.dataset.zoom) !== b.dataset.zoom;
-      b.title = b.disabled ? 'Período longo demais para esta escala' : '';
-    }
+    const hojeX = e.hojeLeft === null ? null : e.hojeLeft + e.pxDia / 2;
 
     const fundo = el('div', { class: 'g-fundo' });
     for (const divisao of e.zoom === 'mes' ? e.meses : e.marcas) {
       if (divisao.fimDeSemana) fundo.append(el('div', { class: 'g-fds', style: { left: px(divisao.left), width: px(divisao.width) } }));
       fundo.append(el('div', { class: 'g-linha-v', style: { left: px(divisao.left) } }));
     }
-    for (const f of estado.calendario.diasUteis ? estado.calendario.feriados : []) {
+    for (const f of feriados) {
       const dia = C.diaNumero(f.data) - e.inicioDia;
       if (dia >= 0 && dia < e.totalDias) fundo.append(el('div', { class: 'g-fds g-feriado', title: f.nome || 'Feriado', style: { left: px(dia * e.pxDia), width: px(e.pxDia) } }));
     }
-    if (hojeNoGantt !== null) fundo.append(el('div', { class: 'g-hoje', style: { left: px(hojeNoGantt) } }));
+    if (hojeX !== null) fundo.append(el('div', { class: 'g-hoje', style: { left: px(hojeX) } }));
 
     const escala = el('div', { class: 'g-escala' },
       ...e.meses.map((m) => el('div', { class: 'g-mes', style: { left: px(m.left), width: px(m.width) } }, el('span', {}, m.rotulo))),
@@ -964,13 +1055,32 @@
           class: `g-marca${m.fimDeSemana ? ' fds' : ''}${e.zoom === 'semana' ? ' semana' : ''}${m.left === e.hojeLeft && e.zoom === 'dia' ? ' hoje' : ''}`,
           style: { left: px(m.left), width: px(m.width) },
         }, m.rotulo)),
-      hojeNoGantt !== null && el('div', { class: 'g-hoje-marcador', title: `Hoje, ${C.formatarData(hoje)}`, style: { left: px(hojeNoGantt) } }),
+      hojeX !== null && el('div', { class: 'g-hoje-marcador', title: `Hoje, ${C.formatarData(hoje)}`, style: { left: px(hojeX) } }),
     );
 
     const posicaoDe = (inicio, fim) => ({
       left: px((C.diaNumero(inicio) - e.inicioDia) * e.pxDia),
       width: px((C.diaNumero(fim) - C.diaNumero(inicio) + 1) * e.pxDia),
     });
+
+    return { fundo, escala, hojeX, posicaoDe };
+  }
+
+  function renderGantt(lista, cores, hoje, podeArrastar) {
+    const base = new Map((estado.linhaBase?.tarefas || []).map((b) => [b.id, b]));
+    const planejadas = lista.filter((t) => base.has(t.id)).map((t) => ({ id: `base:${t.id}`, inicio: base.get(t.id).inicio, fim: base.get(t.id).fim }));
+    const alcance = [...lista, ...planejadas];
+    const e = C.escalaGantt(alcance, estado.zoom, hoje);
+    const criticas = estado.critico ? C.caminhoCritico(estado.tarefas, estado.calendario) : new Set();
+    $('#btn-critico').setAttribute('aria-pressed', String(estado.critico));
+    const px = (n) => `${n}px`;
+    for (const b of document.querySelectorAll('[data-zoom]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.zoom === e.zoom));
+      b.disabled = C.zoomEfetivo(alcance, b.dataset.zoom) !== b.dataset.zoom;
+      b.title = b.disabled ? 'Período longo demais para esta escala' : '';
+    }
+    const { fundo, escala, hojeX, posicaoDe } = linhaDoTempo(e, hoje, estado.calendario.diasUteis ? estado.calendario.feriados : []);
+    hojeNoGantt = hojeX;
 
     const linhaTarefa = (t) => {
       const status = C.statusTarefa(t, hoje);
@@ -1153,9 +1263,9 @@
     }, `${desvio > 0 ? '+' : '−'}${textoDias(desvio)}`);
   }
 
-  function renderCarga(lista, hoje) {
-    const carga = C.cargaPorResponsavel(lista, estado.calendario);
-    const caixa = $('#vista-carga');
+  function renderCarga(lista, hoje, { alvo = $('#vista-carga'), calendario = estado.calendario } = {}) {
+    const carga = C.cargaPorResponsavel(lista, calendario);
+    const caixa = alvo;
     if (!carga.pessoas.length) {
       caixa.replaceChildren(el('p', { class: 'carga-legenda' }, 'Nenhuma atividade com duração para medir a carga (marcos não ocupam ninguém).'));
       return;
@@ -1163,7 +1273,7 @@
     const nomeDe = new Map(lista.map((t) => [t.id, t.nome]));
     const dia = C.diaNumero(hoje);
     const atual = carga.semanas.findIndex((s) => C.diaNumero(s.inicio) <= dia && dia <= C.diaNumero(s.fim));
-    const unidade = estado.calendario.diasUteis ? 'num mesmo dia útil' : 'num mesmo dia';
+    const unidade = calendario?.diasUteis ? 'num mesmo dia útil' : 'num mesmo dia';
     caixa.replaceChildren(
       el('p', { class: 'carga-legenda' },
         `Cada célula mostra quantas atividades a pessoa tem ao mesmo tempo ${unidade} na semana (o pico). `,
@@ -1677,6 +1787,7 @@
     });
   }
   $('#btn-hoje').addEventListener('click', irParaHoje);
+  $('#btn-visao-geral').addEventListener('click', abrirVisaoGeral);
 
   const menuEmpresas = $('#menu-empresas');
   const dialogoEmpresa = $('#dialogo-empresa');

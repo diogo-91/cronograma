@@ -1009,6 +1009,74 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.equal(await lb.page.textContent('#f-feriados-total'), '1 feriado');
   await lb.page.click('[data-fechar-calendario].btn');
 
+  // visão geral: todas as empresas juntas
+  const vg = await nova({ viewport: { width: 1366, height: 1000 } });
+  const urlVg = await novoServidor();
+  await entrar(vg.page, urlVg);
+  const hojeVg = C.diaNumero(C.hojeISO());
+  const dVg = (n) => C.isoDeDia(hojeVg + n);
+  const importarVg = async (nome, tarefas) => {
+    const arq = path.join(OUT, `geral-${nome}.json`);
+    fs.writeFileSync(arq, JSON.stringify({ tarefas }));
+    await vg.page.setInputFiles('#arquivo', arq);
+    await aguardarAnuncio(vg.page, `${tarefas.length} atividades importadas.`);
+    await aguardarSalvo(vg.page);
+  };
+  await vg.page.fill('#titulo', 'Alfa');
+  await vg.page.press('#titulo', 'Enter');
+  await importarVg('alfa', [
+    { id: 'x', nome: 'Painel elétrico', responsavel: 'Ana', inicio: dVg(0), fim: dVg(3), progresso: 20 },
+    { id: 'y', nome: 'Motor 50cv', responsavel: 'Bruno', inicio: dVg(5), fim: dVg(9) },
+  ]);
+  await vg.page.click('#menu-empresas summary');
+  await vg.page.click('#btn-nova-empresa');
+  await vg.page.fill('#f-empresa', 'Beta');
+  await vg.page.click('#form-empresa button[type=submit]');
+  await vg.page.waitForFunction(() => document.querySelector('#titulo').value === 'Beta');
+  await importarVg('beta', [
+    { id: 'x', nome: 'Bomba d’água', responsavel: 'Ana', inicio: dVg(-6), fim: dVg(-2), progresso: 40 },
+    { id: 'z', nome: 'Rebobinagem', responsavel: 'Ana', inicio: dVg(0), fim: dVg(1), progresso: 0 },
+  ]);
+
+  await vg.page.click('#menu-empresas summary');
+  await vg.page.click('#btn-visao-geral');
+  await vg.page.waitForSelector('body[data-tela="geral"]');
+  assert.equal(await vg.page.isVisible('#titulo'), false);
+  assert.equal(await vg.page.isVisible('.titulo-geral'), true);
+  assert.equal(await vg.page.isVisible('#btn-nova'), false, 'visão geral não cria atividade solta');
+  assert.equal(await vg.page.textContent('#geral-resumo .kpi-atividades .cartao-valor'), '4');
+  assert.equal(await vg.page.textContent('#geral-resumo .kpi-atrasadas .cartao-valor'), '1');
+  assert.deepEqual(await vg.page.$$eval('#geral-gantt .g-nome-texto', (els) => els.map((e) => e.textContent)), ['Alfa', 'Beta']);
+  assert.match(await vg.page.textContent('#geral-gantt [data-empresa] .atrasadas'), /1 atrasada/);
+  assert.equal(await vg.page.locator('#geral-gantt .g-resumo-empresa').count(), 2);
+  assert.equal(await vg.page.textContent('#geral-atrasadas-titulo'), 'Atrasadas (1)');
+  assert.match(await vg.page.textContent('#geral-atrasadas li'), /Bomba d’água.*Beta · Ana · venceu em .* \(há 2 dias\)/);
+  const anaGeral = await vg.page.$$eval('#geral-carga tbody tr:has(th:has-text("Ana")) td', (tds) => tds.map((td) => [td.textContent, td.className, td.title]));
+  const cheia = anaGeral.find(([, , titulo]) => titulo.includes('Painel elétrico (Alfa)') && titulo.includes('Rebobinagem (Beta)'));
+  assert.ok(cheia, 'Ana tem atividade em Alfa e em Beta na mesma semana');
+  assert.equal(cheia[0], '2');
+  assert.match(cheia[1], /sobrecarga/);
+  await vg.page.screenshot({ path: path.join(OUT, '29-visao-geral.png'), fullPage: true });
+
+  const vgCel = await nova({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await entrar(vgCel.page, urlVg);
+  await vgCel.page.click('#menu-empresas summary');
+  await vgCel.page.click('#btn-visao-geral');
+  await vgCel.page.waitForSelector('body[data-tela="geral"]');
+  assert.ok(await vgCel.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'visão geral sem rolagem lateral no celular');
+  await vgCel.page.screenshot({ path: path.join(OUT, '30-visao-geral-celular.png'), fullPage: true });
+
+  await vg.page.click('.atrasada-item');
+  await vg.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await vg.page.inputValue('#titulo'), 'Beta', 'atrasada abre a empresa dela');
+  await vg.page.click('#menu-empresas summary');
+  await vg.page.click('#btn-visao-geral');
+  await vg.page.waitForSelector('body[data-tela="geral"]');
+  await vg.page.click('#geral-gantt [data-empresa]:has(.g-nome-texto:text-is("Alfa")) .g-resumo-empresa');
+  await vg.page.waitForSelector('body[data-tela="app"]');
+  assert.equal(await vg.page.inputValue('#titulo'), 'Alfa', 'barra abre a empresa');
+  assert.equal(await vg.page.locator('#vista-gantt .g-barra').count(), 2);
+
   // sair volta para a tela de senha
   await page.click('#menu summary');
   await page.click('[data-acao=sair]');
