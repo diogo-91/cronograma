@@ -38,8 +38,8 @@
     ilustracao: `<svg class="ilustracao" viewBox="0 0 240 150" aria-hidden="true">
       <rect x="12" y="10" width="216" height="128" rx="16" fill="#ffffff" stroke="#e6e4de"/>
       <path d="M12 40h216" stroke="#e6e4de"/>
-      <circle cx="30" cy="25" r="4" fill="#f2d27a"/><circle cx="44" cy="25" r="4" fill="#e6e4de"/><circle cx="58" cy="25" r="4" fill="#e6e4de"/>
-      <rect x="30" y="54" width="78" height="14" rx="7" fill="#d4a12a"/>
+      <circle cx="30" cy="25" r="4" fill="#a9c1f7"/><circle cx="44" cy="25" r="4" fill="#e6e4de"/><circle cx="58" cy="25" r="4" fill="#e6e4de"/>
+      <rect x="30" y="54" width="78" height="14" rx="7" fill="#1d4ed8"/>
       <rect x="64" y="78" width="104" height="14" rx="7" fill="#6366f1" opacity="0.85"/>
       <rect x="112" y="102" width="88" height="14" rx="7" fill="#14b8a6" opacity="0.85"/>
       <path d="M140 46v84" stroke="#e5484d" stroke-width="2" stroke-dasharray="4 4"/>

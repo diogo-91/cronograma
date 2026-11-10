@@ -1,4 +1,4 @@
-# Cronograma · GoldSystem
+# Cronograma · SRCB
 
 Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com datas de início e término, gráfico de Gantt, lista, filtros e exportação. Os dados ficam no servidor, então o mesmo cronograma aparece no computador e no celular. O acesso é protegido por senha.
 
@@ -18,6 +18,7 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 ## O que faz
 
 - **Empresas:** cada empresa tem seu próprio cronograma. O botão *Empresas*, ao lado do nome, lista as empresas para trocar e cria novas; o nome é editado no próprio título; *Arquivo → Excluir esta empresa* remove uma (sempre fica pelo menos uma). Cada aparelho lembra a última empresa aberta.
+- **Visão geral:** no menu *Empresas*, *Visão geral (todas)* junta todas as empresas numa tela só: resumo somado (progresso ponderado, atrasadas, em andamento), um Gantt com uma barra por empresa (do início ao fim do cronograma dela, com o progresso), a lista de atividades atrasadas de todas as empresas (a mais antiga primeiro) e a carga da equipe somando as empresas, para ver quem está com atividades em mais de um cliente ao mesmo tempo. Clicar numa empresa, barra ou atrasada abre o cronograma dela. A tela só lê; a edição continua dentro de cada empresa. Na carga somada, cada dia corrido conta, sem o calendário de dias úteis de cada empresa.
 - Atividades com nome, fase, responsável, início, término, progresso (%), notas e checklist.
 - **Notas com formatação:** negrito, itálico, sublinhado, listas com marcadores e numeradas. Só essas marcações são guardadas (sem atributos), e colar texto de fora entra sem formatação.
 - **Checklist** por atividade: itens marcáveis (Enter cria o próximo, Backspace num item vazio apaga). O contador aparece na lista e no Gantt; o progresso continua manual.
@@ -36,7 +37,7 @@ Se a página disser "Servidor do cronograma não encontrado", o Build Pack ainda
 - Resumo com progresso geral ponderado pela duração, contagem por status e período total.
 - Busca (ignora acentos e maiúsculas) e filtros por fase e status.
 - **Arquivo:** backup em JSON (exportar/importar; leva atividades, calendário com feriados e linha de base — backup antigo, sem calendário, mantém o calendário atual), exportação CSV para Excel (separador `;`, datas dd/mm/aaaa), impressão / PDF e Sair.
-- Tema claro, com a marca GoldSystem no topo e no ícone da aba.
+- Tema claro em azul, com a marca SRCB no topo, na tela de senha e no ícone da aba.
 
 ## Onde ficam os dados
 
@@ -57,7 +58,7 @@ servidor.js        servidor HTTP: arquivos do app, login, API do cronograma, gra
 js/cronograma.js   lógica pura (datas, status, validação, filtros, resumo, escala do Gantt, CSV, importação), usada no navegador e no servidor
 js/app.js          interface (renderização, diálogo, gravação no servidor, importar/exportar)
 css/styles.css     layout responsivo, tema e impressão
-img/               logo GoldSystem (topo e favicon)
+img/               logo SRCB (topo e login) e ícone da aba
 fonts/             fonte Inter embutida (licença OFL em fonts/OFL-Inter.txt)
 tests/             testes unitários da lógica e do servidor (node:test)
 e2e/               teste ponta a ponta no navegador (Playwright)
