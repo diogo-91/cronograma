@@ -1066,6 +1066,14 @@ fs.mkdirSync(OUT, { recursive: true });
   assert.ok(await vgCel.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'visão geral sem rolagem lateral no celular');
   await vgCel.page.screenshot({ path: path.join(OUT, '30-visao-geral-celular.png'), fullPage: true });
 
+  const vgTablet = await nova({ viewport: { width: 768, height: 1024 }, isMobile: true, hasTouch: true });
+  await entrar(vgTablet.page, urlVg);
+  await vgTablet.page.click('#menu-empresas summary');
+  await vgTablet.page.click('#btn-visao-geral');
+  await vgTablet.page.waitForSelector('body[data-tela="geral"]');
+  await vgTablet.page.click('#menu-empresas summary');
+  assert.ok(await vgTablet.page.evaluate(() => document.querySelector('#menu-empresas .menu-itens').getBoundingClientRect().right <= 768 && document.documentElement.scrollWidth <= 768), 'menu Empresas aberto na visão geral cabe nos 768px do tablet');
+
   await vg.page.click('.atrasada-item');
   await vg.page.waitForSelector('body[data-tela="app"]');
   assert.equal(await vg.page.inputValue('#titulo'), 'Beta', 'atrasada abre a empresa dela');

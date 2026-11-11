@@ -136,6 +136,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .btn-empresas { min-height: 34px; padding: 4px 12px; font-size: 0.85rem; }
 .btn-empresas svg { width: 16px; height: 16px; color: var(--marca-texto); }
 .menu-empresas .menu-itens { left: 0; right: auto; min-width: 280px; max-width: min(360px, calc(100vw - 32px)); }
+body[data-tela="geral"] .menu-empresas .menu-itens { left: auto; right: 0; }
 .menu-rotulo { padding: 8px 12px 4px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--texto-suave); }
 .lista-empresas { display: flex; flex-direction: column; max-height: min(50dvh, 360px); overflow-y: auto; }
 .lista-empresas button { justify-content: space-between; }
