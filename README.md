@@ -7,7 +7,7 @@ Ferramenta web para montar e acompanhar cronogramas de atividades: cadastro com 
 1. Na aplicação do cronograma, em **Configuration → General**, troque o **Build Pack** para **Dockerfile** (o arquivo `Dockerfile` está na raiz do repositório).
 2. Em **Ports Exposes**, use `3000`.
 3. Em **Environment Variables**, crie `SENHA` com a senha de acesso (mínimo de 8 caracteres). Marque como segredo, se a opção existir.
-4. Em **Persistent Storage**, adicione um **Volume Mount** com destino (`Destination Path`) `/data`. É ali que fica o arquivo `cronograma.json`; sem o volume, os dados somem a cada novo deploy.
+4. Em **Persistent Storage**, adicione um **Volume Mount** com destino (`Destination Path`) `/data`. É ali que fica o arquivo `empresas.json` (todas as empresas); sem o volume, os dados somem a cada novo deploy.
 5. Faça o **Deploy** e abra o endereço da aplicação. Use um domínio com `https://`: em `http://` a senha e o cookie de sessão trafegam sem criptografia.
 6. Não publique a porta `3000` diretamente (*Ports Mappings* vazio): o limite de tentativas de senha confia no endereço informado pelo proxy do Coolify.
 
